@@ -106,6 +106,7 @@ private:
     Ui::MainWindow *ui;
 };
 
+/*
 class QSqlQueryModelRW : public QSqlQueryModel{
 public:
     using QSqlQueryModel::QSqlQueryModel;
@@ -121,5 +122,6 @@ public:
         return false;
     }
 };
+*/
 
 #endif // MAINWINDOW_H

@@ -106,7 +106,8 @@
 #define SIM_PR_DATE_NEEDED 3
 #define SIM_PR_NUM 4
 #define SIM_PR_PROJECT 5
-#define SIM_PR_STATUS 6
+#define SIM_PR_SUPPLIER 6
+#define SIM_PR_STATUS 7
 
 //PRD Flags
 #define SIM_PRD_SUPPLIER_ID 0
@@ -261,9 +262,10 @@ QString reqDetailsQry = "SELECT trans.used_for, trans.item_id "
 
 QSqlDatabase simdb;
 char loginFlag;
-QString tflag;
 int currentTable;
 int dropdownIndex;
+QString tflag;
+QString docnum;
 QString currentUser = "0";
 QString currentPrivelage;
 QString searchfor;
@@ -415,6 +417,7 @@ void MainWindow::createNewSIMDB()
                 "id         INTEGER PRIMARY KEY "
                 ",address   TEXT NOT NULL "
             ");");
+    q.exec("INSERT INTO addresses (address) VALUES ('Unknown Address');");
     q.exec("CREATE TABLE company (" //This is so similar to a supplier that it may be worth it to classify the company as a supplier.
                 "name                   TEXT "
                 ",shipping_address_id   TEXT "
@@ -425,7 +428,7 @@ void MainWindow::createNewSIMDB()
                 ",email                 TEXT "
                 ",website               TEXT "
             ");");
-    q.exec("INSERT INTO company (name, shipping_address_id, billing_address_id) VALUES ('INSERT COMPANY NAME',2,3);");
+    q.exec("INSERT INTO company (name, shipping_address_id, billing_address_id) VALUES ('INSERT COMPANY NAME',1,1);");
     q.exec("CREATE TABLE suppliers ( "
                 "id             INTEGER PRIMARY KEY "
                 ",name          TEXT NOT NULL "
@@ -491,21 +494,22 @@ void MainWindow::createNewSIMDB()
                 ",date_needed   DATE /*The day by which this is needed. Enter ASAP if it's urgent.*/ "
                 ",requested_by  INTEGER NOT NULL REFERENCES userdata (id) "
                 ",notes         TEXT "
-                ",status        INTEGER NOT NULL DEFAULT 2 "
+                ",status        INTEGER NOT NULL DEFAULT 0 "
             ");");
     /* STATUS FLAGS
-     *      0 = completed
-     *      1 = partially completed
-     *      2 = new
-     *      3 = partially completed (at least one rejected)
-     *      4 = completed (at least one rejected) */
+     *      0 = DRAFT
+     *      1 = completed
+     *      2 = partially completed
+     *      3 = new
+     *      4 = partially completed (at least one rejected)
+     *      5 = completed (at least one rejected) */
     q.exec("CREATE TABLE prd ( "
                 "id                 INTEGER PRIMARY KEY "
                 ",pr_num            INTEGER NOT NULL REFERENCES pr (num) ON UPDATE CASCADE "
                 ",item_id           INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",supplier_id       INTEGER REFERENCES suppliers (id) /*The suggested supplier*/ "
                 ",project           TEXT NOT NULL REFERENCES projects (name) ON UPDATE CASCADE /*The project this is needed for*/ "
-                ",qty               INTEGER NOT NULL "
+                ",qty               REAL NOT NULL "
                 ",unit              TEXT "
                 ",expected_price    INTEGER "
                 ",is_open           INTEGER NOT NULL DEFAULT 1 /*0=closed-ordered,1=open-not-ordered,2=closed-rejected*/ "
@@ -590,7 +594,7 @@ void MainWindow::createNewSIMDB()
                 "id             INTEGER PRIMARY KEY "
                 ",rr_num        INTEGER NOT NULL REFERENCES rr (num) ON UPDATE CASCADE "
                 ",item_id       INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
-                ",qty           INTEGER NOT NULL " //This has to be checked against the PO
+                ",qty           REAL NOT NULL " //This has to be checked against the PO
                 ",unit          TEXT "
                 ",condition     TEXT NOT NULL REFERENCES conditions (name) "
                 ",comments      TEXT "
@@ -609,7 +613,7 @@ void MainWindow::createNewSIMDB()
                 "id         INTEGER PRIMARY KEY "
                 ",mr_num    INTEGER NOT NULL REFERENCES mr (num) ON UPDATE CASCADE "
                 ",item_id   INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
-                ",qty       INTEGER NOT NULL "
+                ",qty       REAL NOT NULL "
                 ",unit      TEXT REFERENCES items (unit) "
             ");");
     /*                                  A WORD ABOUT DRAFTS
@@ -618,7 +622,6 @@ void MainWindow::createNewSIMDB()
      *  clear out drafts. This is intentional (a.) because it significantly less complex that including a separate
      *  table dedicated to only drafts and (b.) because it encourages the user to not have drafts sitting in SIM
      *  for a very long time. When drafts are cleared out, it creates space for the next draft to come in. */
-    qDebug() << q.lastError();
     simdb.close();
 }
 
@@ -656,7 +659,6 @@ void MainWindow::on_actionItem_History_triggered() //Every transaction in the In
     "LEFT JOIN mr ON mrd.mr_num = mr.num "
     "LEFT JOIN userdata ON userdata.id = mr.authorized_by "
     ";");
-    qDebug() << qry.lastError();
     model->setQuery(qry);
     while (model->canFetchMore()) {model->fetchMore();}
     simdb.close();
@@ -891,12 +893,12 @@ void MainWindow::on_actionPurchase_Requisitions_triggered() //PR
     qry.exec("SELECT pr.requested_by, userdata.name AS 'Requested By', pr.date AS 'Date Created', pr.date_needed AS 'Date Needed', pr.num AS 'PR#' "
         ",group_concat(DISTINCT prd.project) AS 'Project(s)', group_concat(DISTINCT suppliers.name) AS 'Recommended Supplier(s)' "
         ",CASE status "
-            "WHEN 0 THEN 'Closed '"
-            "WHEN 1 THEN 'Partial' "
-            "WHEN 2 THEN 'Open' "
-            "WHEN 3 THEN 'Partial (Item(s) Rejected)' "
-            "WHEN 4 THEN 'Closed (Item(s) Rejected)' "
-            "WHEN 5 THEN 'Unknown' "
+            "WHEN 0 THEN 'Draft' "
+            "WHEN 1 THEN 'Closed '"
+            "WHEN 2 THEN 'Partial' "
+            "WHEN 3 THEN 'Open' "
+            "WHEN 4 THEN 'Partial (Item(s) Rejected)' "
+            "WHEN 5 THEN 'Closed (Item(s) Rejected)' "
         "END as 'Status' "
         "FROM pr "
         "LEFT JOIN prd ON prd.pr_num = pr.num "
@@ -927,14 +929,14 @@ void MainWindow::createPR_Details(QString prnum)
 
     QSqlQuery qry(simdb);
     simdb.open();
-    qry.exec(QString("SELECT userdata.name, pr.date, pr.date_needed"
+    qry.exec(QString("SELECT userdata.name, pr.date, pr.date_needed "
         ",CASE pr.status "
-            "WHEN 0 THEN 'Closed '"
-            "WHEN 1 THEN 'Partial' "
-            "WHEN 2 THEN 'Open' "
-            "WHEN 3 THEN 'Partial (Item(s) Rejected)' "
-            "WHEN 4 THEN 'Closed (Item(s) Rejected)' "
-            "WHEN 5 THEN 'Unknown' "
+            "WHEN 0 THEN 'Draft' "
+            "WHEN 1 THEN 'Closed '"
+            "WHEN 2 THEN 'Partial' "
+            "WHEN 3 THEN 'Open' "
+            "WHEN 4 THEN 'Partial (Item(s) Rejected)' "
+            "WHEN 5 THEN 'Closed (Item(s) Rejected)' "
         "END as 'Status' "
         "FROM pr "
         "LEFT JOIN userdata ON userdata.id = pr.requested_by "
@@ -947,7 +949,7 @@ void MainWindow::createPR_Details(QString prnum)
     if (!(qry.value(3).toString() == ""))
         extra2 = QString("%1Needed by: %2\n").arg(extra2, qry.value(3).toString());
     ui->ExtraDetails2->setText(extra2);
-    qry.exec(QString("SELECT printf('%.2f', SUM(prd.expected_price)) FROM prd WHERE prd.pr_num = %1;").arg(prnum));
+    qry.exec(QString("SELECT printf('%.2f', SUM(prd.expected_price * prd.qty)) FROM prd WHERE prd.pr_num = %1;").arg(prnum));
     qry.next();
     ui->Totals->setText(QString("Total $%1").arg(qry.value(0).toString()));
 
@@ -1085,7 +1087,6 @@ void MainWindow::on_actionRequested_Items_triggered() //MR
         "GROUP BY mr.num "
         "ORDER BY mr.num "
         ";");
-    qDebug() << qry.lastError();
     model->setQuery(qry);
     while (model->canFetchMore()) {model->fetchMore();}
     simdb.close();
@@ -1237,7 +1238,15 @@ void MainWindow::on_ItemTable_doubleClicked(const QModelIndex &index)
         break;
     }
     case SIM_PR: {
-        createPR_Details(index.siblingAtColumn(SIM_PR_NUM).data().toString());
+        if (index.siblingAtColumn(SIM_PR_STATUS).data().toString() == "Draft")
+        {
+            docnum = index.siblingAtColumn(SIM_PR_NUM).data().toString();
+            tflag = "0";
+            CreateDocument h;
+            h.setWindowTitle("Edit Purchase Order Draft #"+docnum);
+            h.exec();
+        } else
+            createPR_Details(index.siblingAtColumn(SIM_PR_NUM).data().toString());
         break;
     }
     case SIM_PO: {
@@ -1602,6 +1611,7 @@ void MainWindow::on_actionEdit_Company_Information_triggered()
 void MainWindow::on_actionCreate_Purchase_Requisition_triggered()
 {
     tflag = "0";
+    docnum.clear();
     CreateDocument d;
     d.setWindowTitle("Doc test");
     d.setWindowFlags(Qt::Window);
@@ -1611,6 +1621,7 @@ void MainWindow::on_actionCreate_Purchase_Requisition_triggered()
 void MainWindow::on_actionCreate_Quotation_Request_triggered()
 {
     tflag = "1";
+    docnum.clear();
     CreateDocument d;
     d.setWindowTitle("Doc test");
     d.setWindowFlags(Qt::Window);
@@ -1620,6 +1631,7 @@ void MainWindow::on_actionCreate_Quotation_Request_triggered()
 void MainWindow::on_actionCreate_Purchase_Order_triggered()
 {
     tflag = "2";
+    docnum.clear();
     CreateDocument d;
     d.setWindowTitle("Doc test");
     d.setWindowFlags(Qt::Window);
@@ -1630,6 +1642,7 @@ void MainWindow::on_actionCreate_Purchase_Order_triggered()
 void MainWindow::on_actionReceive_Items_triggered()
 {
     tflag = "3";
+    docnum.clear();
     CreateDocument d;
     d.setWindowTitle("Doc test");
     d.setWindowFlags(Qt::Window);
@@ -1639,6 +1652,7 @@ void MainWindow::on_actionReceive_Items_triggered()
 void MainWindow::on_actionDistribute_Inventory_triggered()
 {
     tflag = "4";
+    docnum.clear();
     CreateDocument d;
     d.setWindowTitle("Doc test");
     d.setWindowFlags(Qt::Window);

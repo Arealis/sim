@@ -9,6 +9,15 @@ namespace Ui {
 class CreateDocument;
 }
 
+class ResizableTable : public QTableWidget {
+    Q_OBJECT
+public:
+    explicit ResizableTable(QWidget* parent = nullptr);
+
+    void resizeEvent(QResizeEvent *event);
+
+
+};
 
 class CreateDocument : public QDialog
 {
@@ -35,26 +44,24 @@ private slots:
 
     void deleteCustom();
 
+    void insertCustomField(QString name, QString value);
+
+    void insertRows(QSqlQuery qry, ResizableTable *table, int tFlag);
+
+    void insertDetails(QSqlQuery qry, int tFlag);
+
+    void DeleteDocument();
+
 private:
     Ui::CreateDocument *ui;
 };
 
-class ResizableTable : public QTableWidget {
-    Q_OBJECT
-public:
-    explicit ResizableTable(QWidget* parent = nullptr);
-
-    void resizeEvent(QResizeEvent *event);
-
-
-};
 
 QString concatAddress(QSqlQuery sqlQuery, int startsAt, int length);
 
 QString returnStringINN(QVariant sqlValue, QString ifNotNull, QString ifNull);
 
 
-extern QString tflag;
-extern QString currentUser;
+extern QString tflag, currentUser, docnum;
 
 #endif // CREATEDOCUMENT_H

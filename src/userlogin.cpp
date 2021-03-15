@@ -46,6 +46,12 @@ UserLogin::~UserLogin()
 
 void UserLogin::on_acceptButton_clicked()
 {
+    QString email;
+    if (ui->emailLineEdit->text().isEmpty())
+        email = "null";
+    else
+        email = "'"+ui->emailLineEdit->text()+"'";
+
     switch(loginFlag) {
     case 2: { //edit
         if (ok)
@@ -55,16 +61,16 @@ void UserLogin::on_acceptButton_clicked()
                 QSqlDatabase simdb = QSqlDatabase::database("sim", false);
                 QSqlQuery q(simdb);
                 simdb.open();
-                q.exec(QString("UPDATE userdata SET name = '%1', user = '%2', email = '%3' WHERE id = %4;")
-                       .arg(ui->nameLineEdit->text(), ui->usrLineEdit->text(), ui->emailLineEdit->text() ,currentUser));
+                q.exec(QString("UPDATE userdata SET name = '%1', user = '%2', email = %3 WHERE id = %4;")
+                       .arg(ui->nameLineEdit->text(), ui->usrLineEdit->text(), email ,currentUser));
                 simdb.close();
                 UserLogin::close();
             } else {
                 QSqlDatabase simdb = QSqlDatabase::database("sim", false);
                 QSqlQuery q(simdb);
                 simdb.open();
-                q.exec(QString("UPDATE userdata SET name = '%1', user = '%2', email = '%3', pass = '%5' WHERE id = %4;")
-                       .arg(ui->nameLineEdit->text(), ui->usrLineEdit->text(), ui->emailLineEdit->text() ,currentUser, ui->passLineEdit->text()));
+                q.exec(QString("UPDATE userdata SET name = '%1', user = '%2', email = %3, pass = '%5' WHERE id = %4;")
+                       .arg(ui->nameLineEdit->text(), ui->usrLineEdit->text(), email ,currentUser, ui->passLineEdit->text()));
                 simdb.close();
                 UserLogin::close();
             }
@@ -79,10 +85,10 @@ void UserLogin::on_acceptButton_clicked()
             QSqlQuery q(simdb);
             simdb.open();
             q.exec(QString("INSERT INTO userdata (name, user, email, pass, privelage)"
-            "VALUES ('%1', '%2', '%3', '%4', %5);")
+            "VALUES ('%1', '%2', %3, '%4', %5);")
                    .arg(ui->nameLineEdit->text()
                         ,ui->usrLineEdit->text()
-                        ,ui->emailLineEdit->text()
+                        ,email
                         ,ui->passLineEdit->text()
                         ,QString::number(ui->privelageComboBox->currentIndex())));
             q.exec(QString("SELECT id FROM userdata WHERE user = '%1';").arg(ui->usrLineEdit->text()));

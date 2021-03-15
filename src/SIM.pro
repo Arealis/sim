@@ -29,6 +29,7 @@ SOURCES += \
 HEADERS += \
     createdocument.h \
     editcompanyinfo.h \
+    global.h \
     mainwindow.h \
     userlogin.h
 
