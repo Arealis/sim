@@ -8,6 +8,7 @@
 #include <QLineEdit>
 #include <QKeyEvent>
 #include <QSqlQueryModel>
+#include <QMenu>
 
 class CreateDocument;
 
@@ -21,6 +22,30 @@ class ResizableTable : public QTableWidget {
 public:
     explicit ResizableTable(CreateDocument* parent = nullptr);
 
+    struct columnId {
+        //! This is all the data from the column headers so that they can be referenced in the program
+        //! without having to do expensive look ups by passing in string arguments into a QTableWidget function
+        //! ... though I have not measured the speed impact that this has. Certainly, this cannot be the best way,
+        //! and could use a refactor
+        char itemId = 0;
+        char itemNum = 1;
+        char itemDesc = 2;
+        char cat = 3;
+        char qty = 4;
+        char unit = 5;
+        char unitPrice;
+        char supplierId;
+        char supplier;
+        char status;
+        char total;
+        char tax;
+        char project;
+    };
+
+    QMenu *menu;
+    QAction *deleteRow;
+    columnId cid;
+
     int finalRow;
     int cfRow, customButtonRow;
     int priceCol, qtyCol;
@@ -28,6 +53,8 @@ public:
     QStringList colNames;
 
     QSqlQueryModel *itemModel, *projectModel, *supplierModel;
+
+    void storeTableDetails(QSqlQuery qry, QString docnum, int tableFlag);
 
     void fetchRows(QSqlQuery qry, int tFlag, QString docnum);
 
@@ -39,6 +66,8 @@ public:
     void customLineEdit(int row, lineType type);
 
     void initializeColumns(int tflag);
+
+    void onCustomContextMenuRequested(const QPoint &pos);
 };
 
 class CreateDocument : public QDialog
@@ -75,14 +104,12 @@ private slots:
     void fetchDetails(QSqlQuery qry, int tFlag, QString docnum);
 
     void DeleteDocument();
+
 private:
     Ui::CreateDocument *ui;
 };
 
-QString concatAddress(QSqlQuery sqlQuery, int startsAt, int length);
-
 QString returnStringINN(QVariant sqlValue, QString ifNotNull, QString ifNull);
-
 
 extern QString tflag, currentUser, docnum;
 

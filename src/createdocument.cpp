@@ -14,7 +14,6 @@
 #include <QSqlError>
 
 QString docname;
-int priceCol, qtyCol;
 
 QString returnStringINN(QVariant sqlValue, QString ifNotNull = "%1\n", QString ifNull = "")
 {
@@ -200,45 +199,74 @@ ResizableTable::ResizableTable(CreateDocument *parent) :
         if (row == finalRow && !item(row,column)->text().isEmpty())
             appendRow();
 
-        // This will have to become dramatically more robust to account for all doctypes
-        if (column == priceCol || column == qtyCol)
+        // This is the create totals fucntion. It will have to become dramatically more robust to account for all doctypes. This should probably not be a lambda function.
+        if (column == cid.unitPrice || column == cid.qty)
         {
             double total = 0;
             for (int r = 0; r < finalRow; r++)
-                total += (item(r, priceCol)->text().toDouble() * item(r, qtyCol)->text().toDouble());
+                total += (item(r, cid.unitPrice)->text().toDouble() * item(r, cid.qty)->text().toDouble());
             static_cast<CreateDocument*>(parent)->setTotal(total);
         }
     });
+
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    menu = new QMenu(this);
+    deleteRow = new QAction(this);
+    deleteRow->setText("Delete Row");
+    menu->addAction(deleteRow);
+    connect(this, &ResizableTable::customContextMenuRequested, [=] (const QPoint &pos) { ResizableTable::onCustomContextMenuRequested(pos); });
 }
+
+
 
 void ResizableTable::initializeColumns(int tflag)
 {
     switch (tflag) {
     case 0: {
-        colNames = {"id", "Item ID", "Description", "Qty", "Unit", "Project", "sid", "Recommended Supplier", "Expected Unit Price", "Status"};
-        priceCol = 8;
+        colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "Project", "sid", "Recommended Supplier", "Expected Unit Price", "Status"};
+        cid.project = 6;
+        cid.supplierId = 7;
+        cid.supplier = 8;
+        cid.unitPrice = 9;
+        cid.status = 10;
         break;
     }
     case 1: {
-        colNames = {"id", "Item ID", "Description", "Qty", "Unit", "Unit Price", "Total", "Status"};
-        priceCol = 6;
+        colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "Unit Price", "Total", "Status"};
+        cid.unitPrice = 6;
+        cid.total = 7;
+        cid.status = 8;
         break;
     }
     case 2: {
-        colNames = {"id", "Item ID", "Description", "Qty", "Unit", "Unit Price", "Tax?", "Total", "Status"};
-        priceCol = 5;
+        colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "Unit Price", "Tax?", "Total", "Status"};
+        cid.unitPrice = 6;
+        cid.tax = 7;
+        cid.total = 8;
+        cid.status = 9;
         break;
     }
     case 3: {
-        colNames = {"id", "Item ID", "Description", "Qty", "Unit", "Condition"};
+        colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "Condition"};
+        cid.status = 6;
         break;
     }
     case 4: {
-        colNames = {"id", "Item ID", "Description", "Qty", "Unit"};
+        colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit"};
         break;
     }
     }
-    qtyCol = 3;
+}
+
+void ResizableTable::onCustomContextMenuRequested(const QPoint &pos)
+{
+    menu->popup(viewport()->mapToGlobal(pos));
+    connect(deleteRow, &QAction::triggered,
+            [=] ()
+            {
+                removeRow(currentRow());
+                finalRow--;
+            });
 }
 
 void CreateDocument::setTotal(double total)
@@ -345,7 +373,7 @@ void CreateDocument::fetchCustomDetails(QSqlQuery qry, int *row, QString tableFl
             deleteButton->setMaximumSize(QSize(16,16));
             deleteButton->setText("x");
             deleteButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-            deleteButton->setStyleSheet(cssalert1);
+            deleteButton->setStyleSheet("background-color: #ff0000;");
             ui->gridLayout->addWidget(deleteButton, *row, 2);
             connect(deleteButton, &QPushButton::clicked, this, &CreateDocument::deleteCustomDetail);
         }
@@ -469,56 +497,7 @@ void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDoc
                       ,ui->dateNeeded->date().toString("yyyy-MM-dd")
                       ,currentUser
                       ,escapeSql(ui->notes->toPlainText())));
-        for (int i = 0; i < table->finalRow; i++)
-        {
-            // Ensure item is valid
-            if (table->item(i,0)->text().isEmpty())
-            {
-                qry.exec(QString("INSERT INTO items (num, desc, unit) VALUES (%1, %2, %3);")
-                         .arg(escapeSql(qobject_cast<QLineEdit*>(table->cellWidget(i,1))->text())
-                              ,escapeSql(qobject_cast<QLineEdit*>(table->cellWidget(i,2))->text())
-                              ,escapeSql(table->item(i,4)->text())));
-                qry.exec("SELECT id FROM items ORDER BY id DESC LIMIT 1;");
-                qry.next();
-                table->item(i,0)->setText(qry.value(0).toString());
-            }
-            // Ensure supplier is valid
-            if (table->item(i,6)->text().isEmpty())
-            {
-                QString supplierName = qobject_cast<QLineEdit*>(table->cellWidget(i,7))->text();
-                qry.exec("INSERT INTO suppliers (name) VALUES ("%escapeSql(supplierName)%");");
-                qry.exec("SELECT id FROM suppliers ORDER BY id DESC LIMIT 1;");
-                qry.next();
-                for (int j = i; j < table->finalRow; j++) //Make it so repeates suppliers have the same number
-                {
-                    if (qobject_cast<QLineEdit*>(table->cellWidget(j,7))->text() == supplierName)
-                        table->item(j,6)->setText(qry.value(0).toString());
-                }
-            }
-            // Ensure project is valid
-            qry.exec("SELECT name FROM projects WHERE name = "%escapeSql(qobject_cast<QLineEdit*>(table->cellWidget(i,5))->text())%";");
-            qry.next();
-            if (qry.value(0).isNull())
-                qry.exec("INSERT INTO projects (name) VALUES ("%escapeSql(qobject_cast<QLineEdit*>(table->cellWidget(i,5))->text())%");");
-            qDebug() << QString("INSERT INTO prd (pr_num, supplier_id, project, item_id, qty, unit, expected_price) "
-                "VALUES (%1, %2, %3, %4, %5, %6, %7);")
-                     .arg(newDocNum
-                          ,table->item(i,6)->text()
-                          ,escapeSql(qobject_cast<QLineEdit*>(table->cellWidget(i,5))->text())
-                          ,table->item(i,0)->text()
-                          ,escapeSql(table->item(i,3)->text())
-                          ,escapeSql(table->item(i,4)->text())
-                          ,escapeSql(table->item(i,8)->text()));
-            qry.exec(QString("INSERT INTO prd (pr_num, supplier_id, project, item_id, qty, unit, expected_price) "
-                "VALUES (%1, %2, %3, %4, %5, %6, %7);")
-                     .arg(newDocNum
-                          ,table->item(i,6)->text()
-                          ,escapeSql(qobject_cast<QLineEdit*>(table->cellWidget(i,5))->text())
-                          ,table->item(i,0)->text()
-                          ,escapeSql(table->item(i,3)->text())
-                          ,escapeSql(table->item(i,4)->text())
-                          ,escapeSql(table->item(i,8)->text())));
-        }
+        table->storeTableDetails(qry, newDocNum, tableFlag);
         break;
     }
     case 1: { //QR
@@ -565,6 +544,65 @@ void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDoc
     simdb.close();
 }
 
+void ResizableTable::storeTableDetails(QSqlQuery qry, QString docnum, int tableFlag)
+{
+    switch (tableFlag) {
+    case 0: {
+        for (int i = 0; i < finalRow; i++)
+        {
+            // Ensure item is valid
+            if (item(i,cid.itemId)->text().isEmpty())
+            {
+                qry.exec(QString("INSERT INTO items (num, desc, unit, cat) VALUES (%1, %2, %3, %4);")
+                         .arg(escapeSql(qobject_cast<QLineEdit*>(cellWidget(i,cid.itemNum))->text())
+                              ,escapeSql(qobject_cast<QLineEdit*>(cellWidget(i,cid.itemDesc))->text())
+                              ,escapeSql(item(i,cid.unit)->text())
+                              ,escapeSql(item(i,cid.cat)->text())));
+                qry.exec("SELECT id FROM items ORDER BY id DESC LIMIT 1;");
+                qry.next();
+                item(i,cid.itemId)->setText(qry.value(0).toString());
+            }
+            // Ensure supplier is valid
+            if (item(i,cid.itemId)->text().isEmpty())
+            {
+                QString supplierName = qobject_cast<QLineEdit*>(cellWidget(i,cid.supplier))->text();
+                qry.exec("INSERT INTO suppliers (name) VALUES ("%escapeSql(supplierName)%");");
+                qry.exec("SELECT id FROM suppliers ORDER BY id DESC LIMIT 1;");
+                qry.next();
+                for (int j = i; j < finalRow; j++) //Loop so repeated supplier names in the doc will all have the same number
+                {
+                    if (qobject_cast<QLineEdit*>(cellWidget(j,cid.supplier))->text() == supplierName)
+                        item(j,cid.supplierId)->setText(qry.value(0).toString());
+                }
+            }
+            // Ensure project is valid
+            qry.exec("SELECT name FROM projects WHERE name = "%escapeSql(qobject_cast<QLineEdit*>(cellWidget(i,cid.project))->text())%";");
+            qry.next();
+            if (qry.value(0).isNull())
+                qry.exec("INSERT INTO projects (name) VALUES ("%escapeSql(qobject_cast<QLineEdit*>(cellWidget(i,cid.project))->text())%");");
+
+            qry.exec(QString("INSERT INTO prd (pr_num, supplier_id, project, item_id, qty, unit, expected_price) "
+                "VALUES (%1, %2, %3, %4, %5, %6, %7);")
+                     .arg(docnum
+                          ,item(i,cid.supplierId)->text()
+                          ,escapeSql(qobject_cast<QLineEdit*>(cellWidget(i,cid.project))->text())
+                          ,item(i,cid.itemId)->text()
+                          ,escapeSql(item(i,cid.qty)->text())
+                          ,escapeSql(item(i,cid.unit)->text())
+                          ,escapeSql(item(i,cid.unitPrice)->text())));
+        }
+        break;
+    }
+    case 1: {
+        for (int i = 0; i < finalRow; i++)
+        {
+
+        }
+        break;
+    }
+    }
+}
+
 //!      ==================================
 //!      ===== RESIZABLE TABLE WIDGET =====
 //!      ==================================
@@ -576,14 +614,15 @@ void ResizableTable::resizeEvent(QResizeEvent *event) //This is called multiple 
     switch (tflag.toInt()) {
     case 0: {
         //{"id", "Item ID", "Description", "Qty", "Unit", "Project", "sid", "Recommended Supplier", "Expected Price", "Status"};
-        w = w / 14;
-        setColumnWidth(1,w*2);
-        setColumnWidth(2,w*3);
-        setColumnWidth(3,w*1);
-        setColumnWidth(4,w*1);
-        setColumnWidth(5,w*2);
-        setColumnWidth(7,w*3);
-        setColumnWidth(8,w*1);
+        w = w / 15;
+        setColumnWidth(cid.itemNum  ,w*2);
+        setColumnWidth(cid.itemDesc ,w*3);
+        setColumnWidth(cid.cat      ,w*1);
+        setColumnWidth(cid.qty      ,w*1);
+        setColumnWidth(cid.unit     ,w*2);
+        setColumnWidth(cid.project  ,w*3);
+        setColumnWidth(cid.supplier ,w*2);
+        setColumnWidth(cid.unitPrice,w*1);
         horizontalHeader()->setStretchLastSection(true);
     }
     }
@@ -611,22 +650,22 @@ void ResizableTable::appendRow()
     }
 
     customLineEdit(finalRow, Item);
-    setColumnHidden(0,true);
+    setColumnHidden(cid.itemId,true);
 
     switch (tflag.toInt()) {
     case 0: { //PR
         customLineEdit(finalRow, Supplier);
         customLineEdit(finalRow, Project);
-        setColumnHidden(6,true); //sid
-        setColumnHidden(9,true); //status
+        setColumnHidden(cid.supplierId,true); //sid
+        setColumnHidden(cid.status,true); //status
         break;
     }
     case 1: { //QR
-        setColumnHidden(6, true); //status
+        setColumnHidden(cid.status, true); //status
         break;
     }
     case 2: { //PO
-        setColumnHidden(8, true); //status
+        setColumnHidden(cid.status, true); //status
         break;
     }
     }
@@ -636,7 +675,7 @@ void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
 {
     switch (tFlag) {
     case 0: {
-        qry.exec("SELECT prd.item_id, items.num, items.desc, prd.qty, items.unit, prd.project, prd.supplier_id, suppliers.name, prd.expected_price, prd.is_open "
+        qry.exec("SELECT prd.item_id, items.num, items.desc, items.cat, prd.qty, items.unit, prd.project, prd.supplier_id, suppliers.name, prd.expected_price, prd.is_open "
         "FROM prd "
         "LEFT JOIN items ON items.id = prd.item_id "
         "LEFT JOIN suppliers ON prd.supplier_id = suppliers.id "
@@ -644,28 +683,28 @@ void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
         break;
     }
     case 1: {
-        qry.exec("SELECT qrd.item_id, items.num, items.desc, qrd.qty, qrd.unit, qrd.unit_price, qrd.total, qrd.status "
+        qry.exec("SELECT qrd.item_id, items.num, items.desc, items.cat, qrd.qty, qrd.unit, qrd.unit_price, qrd.total, qrd.status "
             "FROM qrd "
             "LEFT JOIN items ON items.id = qrd.item_id "
             "WHERE qrd.qr_num = "+docnum+";");
         break;
     }
     case 2: {
-        qry.exec("SELECT pod.item_id, items.num, items.desc, pod.unit, pod.unit_price, pod.taxable, pod.total, pod.status "
+        qry.exec("SELECT pod.item_id, items.num, items.desc, items.cat, pod.unit, pod.unit_price, pod.taxable, pod.total, pod.status "
             "FROM pod "
             "LEFT JOIN items ON items.id = pod.item_id "
             "WHERE pod.po_num = "+docnum+";");
         break;
     }
     case 3: {
-        qry.exec("SELECT rrd.item_id, items.num, items.desc, rrd.qty, rrd.unit, rrd.condition "
+        qry.exec("SELECT rrd.item_id, items.num, items.desc, items.cat, rrd.qty, rrd.unit, rrd.condition "
             "FROM rrd "
             "LEFT JOIN items ON items.id = rrd.item_id "
             "WHERE rrd.rr_num = "+docnum+";");
         break;
     }
     case 4: {
-        qry.exec("SELECT mrd.item_id, items.num, items.desc, mrd.qty, mrd.unit "
+        qry.exec("SELECT mrd.item_id, items.num, items.desc, items.cat, mrd.qty, mrd.unit "
             "FROM mrd "
             "LEFT JOIN items ON items.id = mrd.item_id "
             "WHERE mrd.mr_num = "+docnum+";");
@@ -681,23 +720,12 @@ void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
             {
                 line->setText(qry.value(j).toString());
                 line->completer()->setCompletionPrefix(qry.value(j).toString());
-                line->completer()->complete();
                 emit line->editingFinished();
             }
             else
                 item(i,j)->setText(qry.value(j).toString());
         }
     }
-}
-
-void completerConnector(QCompleter *completer, QLineEdit *line)
-{
-    QObject::connect(completer, static_cast<void (QCompleter::*)(const QModelIndex &index)>(&QCompleter::activated),
-            [completer, line] (const QModelIndex &index)
-            {
-                completer->setCurrentRow(index.row());
-                emit line->editingFinished();
-            });
 }
 
 void ResizableTable::customLineEdit(int row, lineType type)
@@ -723,32 +751,35 @@ void ResizableTable::customLineEdit(int row, lineType type)
         descCompleter->setCaseSensitivity(Qt::CaseInsensitive);
         descCompleter->setCompletionColumn(1);
 
-        completerConnector(completer, line);
-        completerConnector(descCompleter, descLine);
         QObject::connect(line, &QLineEdit::editingFinished,
                 [=] ()
                 {
                     // The below function is redundant, but it must be called for QCompleter to function as intended. QCompleter emits an
-                    // activated signal when Enter/Return is pressed, but not when Tab or Backtab (Shift+Tab) is pressed.or It is easier to put this above every function
-                    // than to write a custom event filter to do the same thing. It is probably also cheaper, though I have not measured.
+                    // activated signal when Enter/Return is pressed, but not when Tab or Backtab (Shift+Tab) is pressed. As a result, whenever
+                    // there are multiple completions available and a user tabs out of the QCompleter, the QCompleter will default to the first
+                    // completion for its comparison, even if the user has selected the 2nd, or 3rd, etc... The best solution would be to reimplement
+                    // the QCompleter and have its event handler also include Tabs and Backtabs, but I don't know how to do that. The solution implemented
+                    // below passes the appropriate text into the completer whenever editingFinished() is emited. Another solution is to have an
+                    // event handler that sets the completer to the correct index whenever Tab or Backtab is pressed from within a QCompleter.
+                    // I am not sure which is faster, but I have settled on the one that takes less code. Measure and refactor later.
                     completer->setCompletionPrefix(line->text());
                     if(completer->currentCompletion() == line->text())
                     {
-                        item(row, 0)->setText(stringAt(completer,0));
+                        item(row, cid.itemId)->setText(stringAt(completer,0));
                         descModel->item(0,1)->setText(stringAt(completer,2));
                         descModel->item(0,0)->setText(stringAt(completer,0));
                         descLine->setText(stringAt(completer,2));
                         descCompleter->setCompletionPrefix(stringAt(completer,2));
-                        item(row,4)->setText(stringAt(completer,3));
+                        item(row,cid.unit)->setText(stringAt(completer,3));
                         line->setStyleSheet(cssclear1);
                         descLine->setStyleSheet(cssclear1);
                     }
                     else
                     {
-                        item(row, 0)->setText("");
+                        item(row, cid.itemId)->setText("");
                         descModel->item(0,1)->setText("");
                         descModel->item(0,0)->setText("");
-                        item(row, 4)->setText("");
+                        item(row, cid.unit)->setText("");
                         line->setStyleSheet(cssalert1);
                         descLine->setStyleSheet(cssalert1);
                     }
@@ -759,13 +790,13 @@ void ResizableTable::customLineEdit(int row, lineType type)
                     // This does not need a setCompleterPrefix function since there can only ever be one completion in this column
                     if (descCompleter->currentCompletion() == descLine->text())
                     {
-                        item(row, 0)->setText(stringAt(descCompleter,0));
+                        item(row, cid.itemId)->setText(stringAt(descCompleter,0));
                         line->setStyleSheet(cssclear1);
                         descLine->setStyleSheet(cssclear1);
                     }
                     else
                     {
-                        item(row, 0)->setText("");
+                        item(row, cid.itemId)->setText("");
                         line->setStyleSheet(cssalert1);
                         descLine->setStyleSheet(cssalert1);
                     }
@@ -773,8 +804,8 @@ void ResizableTable::customLineEdit(int row, lineType type)
 
         line->setCompleter(completer);
         descLine->setCompleter(descCompleter);
-        this->setCellWidget(row, 1, line);
-        this->setCellWidget(row, 2, descLine);
+        this->setCellWidget(row, cid.itemNum, line);
+        this->setCellWidget(row, cid.itemDesc, descLine);
         break;
     }
     case Supplier: {
@@ -782,23 +813,22 @@ void ResizableTable::customLineEdit(int row, lineType type)
         completer->setCompletionColumn(1);
         completer->setFilterMode(Qt::MatchContains);
         completer->setCaseSensitivity(Qt::CaseInsensitive);
-        completerConnector(completer, line);
         QObject::connect(line, &QLineEdit::editingFinished,
                 [=] ()
                 {
                     completer->setCompletionPrefix(line->text());
                     if(completer->currentCompletion() == line->text())
                     {
-                        item(row, 6)->setText(stringAt(completer, 0));
+                        item(row, cid.supplierId)->setText(stringAt(completer, 0));
                         line->setStyleSheet(cssclear1);
                     }
                     else
                     {
-                        item(row, 6)->setText("");
+                        item(row, cid.supplierId)->setText("");
                         line->setStyleSheet(cssalert1);
                     }
                 });
-        setCellWidget(row, 7, line);
+        setCellWidget(row, cid.supplier, line);
         line->setCompleter(completer);
         break;
     }
@@ -806,7 +836,6 @@ void ResizableTable::customLineEdit(int row, lineType type)
         QCompleter *completer = new QCompleter(projectModel, line);
         completer->setFilterMode(Qt::MatchContains);
         completer->setCaseSensitivity(Qt::CaseInsensitive);
-        completerConnector(completer, line);
         QObject::connect(line, &QLineEdit::editingFinished,
                 [=] ()
                 {
@@ -816,7 +845,7 @@ void ResizableTable::customLineEdit(int row, lineType type)
                     else
                         line->setStyleSheet(cssalert1);
                 });
-        setCellWidget(row, 5, line);
+        setCellWidget(row, cid.project, line);
         line->setCompleter(completer);
         break;
     }

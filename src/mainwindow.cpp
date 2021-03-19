@@ -1502,7 +1502,7 @@ void MainWindow::on_ItemTable_customContextMenuRequested(const QPoint &pos)
     switch (currentTable) {
     case SIM_ITEMS:
     {
-        //Currently leaking memory. Refactor.
+        // Is delete ever called for this? Almost definitely leaking memory.
         QMenu *m = new QMenu();
         QAction *addToPO = new QAction();
         QAction *addToPR = new QAction();
@@ -1657,6 +1657,7 @@ void MainWindow::on_actionDistribute_Inventory_triggered()
     d.setWindowTitle("Create Material Requisition");
     d.setWindowFlags(Qt::Window);
     d.exec();
+    ui->ItemTable->update();
 }
 
 void MainWindow::on_actionClean_Database_triggered()
