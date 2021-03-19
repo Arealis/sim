@@ -440,7 +440,7 @@
           <number>9</number>
          </property>
          <item>
-          <widget class="QWidget" name="extraWidget" native="true">
+          <widget class="QWidget" name="details" native="true">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
              <horstretch>0</horstretch>

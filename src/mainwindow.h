@@ -74,6 +74,8 @@ private slots:
 
     void on_actionPing_Databse_triggered();
 
+    void on_actionClean_Database_triggered();
+
     void colorRows();
 
     void on_actionSuppliers_triggered();

@@ -549,6 +549,7 @@
     <addaction name="actionChange_Current_User"/>
     <addaction name="separator"/>
     <addaction name="actionEdit_Company_Information"/>
+    <addaction name="actionClean_Database"/>
     <addaction name="actionBackup_Database"/>
     <addaction name="actionGenerate_Report_For_Current_Table"/>
     <addaction name="actionPrint_Current_Table"/>
@@ -733,6 +734,11 @@
   <action name="actionQuotation_Requests">
    <property name="text">
     <string>Quotation Requests</string>
+   </property>
+  </action>
+  <action name="actionClean_Database">
+   <property name="text">
+    <string>Clean Database</string>
    </property>
   </action>
  </widget>

@@ -1613,7 +1613,7 @@ void MainWindow::on_actionCreate_Purchase_Requisition_triggered()
     tflag = "0";
     docnum.clear();
     CreateDocument d;
-    d.setWindowTitle("Doc test");
+    d.setWindowTitle("Create Purchase Requisition");
     d.setWindowFlags(Qt::Window);
     d.exec();
 }
@@ -1623,7 +1623,7 @@ void MainWindow::on_actionCreate_Quotation_Request_triggered()
     tflag = "1";
     docnum.clear();
     CreateDocument d;
-    d.setWindowTitle("Doc test");
+    d.setWindowTitle("Create Request for Quotation");
     d.setWindowFlags(Qt::Window);
     d.exec();
 }
@@ -1633,7 +1633,7 @@ void MainWindow::on_actionCreate_Purchase_Order_triggered()
     tflag = "2";
     docnum.clear();
     CreateDocument d;
-    d.setWindowTitle("Doc test");
+    d.setWindowTitle("Create Purchase Order");
     d.setWindowFlags(Qt::Window);
     d.exec();
 }
@@ -1644,7 +1644,7 @@ void MainWindow::on_actionReceive_Items_triggered()
     tflag = "3";
     docnum.clear();
     CreateDocument d;
-    d.setWindowTitle("Doc test");
+    d.setWindowTitle("Create Receiving Report");
     d.setWindowFlags(Qt::Window);
     d.exec();
 }
@@ -1654,7 +1654,23 @@ void MainWindow::on_actionDistribute_Inventory_triggered()
     tflag = "4";
     docnum.clear();
     CreateDocument d;
-    d.setWindowTitle("Doc test");
+    d.setWindowTitle("Create Material Requisition");
     d.setWindowFlags(Qt::Window);
     d.exec();
+}
+
+void MainWindow::on_actionClean_Database_triggered()
+{
+    QSqlDatabase simdb = QSqlDatabase::database("sim", false);
+    QSqlQuery qry(simdb);
+    simdb.open();
+    qry.exec("DELETE FROM items WHERE id NOT IN ( "
+        "SELECT DISTINCT prd.item_id FROM prd "
+        "UNION SELECT DISTINCT qrd.item_id FROM qrd "
+        "UNION SELECT DISTINCT pod.item_id FROM pod "
+        "UNION SELECT DISTINCT rrd.item_id FROM rrd "
+        "UNION SELECT DISTINCT mrd.item_id FROM mrd "
+    ");");
+    qDebug() << qry.lastError();
+    simdb.close();
 }
