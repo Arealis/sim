@@ -315,25 +315,8 @@
              <verstretch>0</verstretch>
             </sizepolicy>
            </property>
-           <layout class="QGridLayout" name="gridLayout_2">
-            <item row="1" column="1">
-             <widget class="QComboBox" name="qrnum">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>22</height>
-               </size>
-              </property>
-             </widget>
-            </item>
-            <item row="1" column="0">
-             <widget class="QLabel" name="qrLabel">
-              <property name="text">
-               <string>QR#</string>
-              </property>
-             </widget>
-            </item>
-            <item row="2" column="0">
+           <layout class="QGridLayout" name="internalDetailsGridLayout">
+            <item row="3" column="0">
              <widget class="QLabel" name="poLabel">
               <property name="text">
                <string>PO#</string>
@@ -341,26 +324,6 @@
              </widget>
             </item>
             <item row="3" column="1">
-             <widget class="QComboBox" name="invoicenum">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>22</height>
-               </size>
-              </property>
-             </widget>
-            </item>
-            <item row="0" column="1">
-             <widget class="QComboBox" name="prnum">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>22</height>
-               </size>
-              </property>
-             </widget>
-            </item>
-            <item row="2" column="1">
              <widget class="QComboBox" name="ponum">
               <property name="minimumSize">
                <size>
@@ -370,21 +333,65 @@
               </property>
              </widget>
             </item>
-            <item row="0" column="0">
+            <item row="5" column="0">
+             <widget class="QLabel" name="dateNeededLabel">
+              <property name="text">
+               <string>Date Needed</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="qrLabel">
+              <property name="text">
+               <string>QR#</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="prnum">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>22</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
              <widget class="QLabel" name="prLabel">
               <property name="text">
                <string>PR#</string>
               </property>
              </widget>
             </item>
-            <item row="3" column="0">
+            <item row="4" column="1">
+             <widget class="QComboBox" name="invoicenum">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>22</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QComboBox" name="qrnum">
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>22</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0">
              <widget class="QLabel" name="invoiceLabel">
               <property name="text">
                <string>INV#</string>
               </property>
              </widget>
             </item>
-            <item row="4" column="1">
+            <item row="5" column="1">
              <widget class="QDateEdit" name="dateNeeded">
               <property name="displayFormat">
                <string>yyyy/MM/dd</string>
@@ -404,10 +411,13 @@
               </property>
              </widget>
             </item>
-            <item row="4" column="0">
-             <widget class="QLabel" name="dateNeededLabel">
+            <item row="0" column="1">
+             <widget class="QLineEdit" name="project"/>
+            </item>
+            <item row="0" column="0">
+             <widget class="QLabel" name="projectLabel">
               <property name="text">
-               <string>Date Needed</string>
+               <string>Project</string>
               </property>
              </widget>
             </item>
@@ -625,21 +635,33 @@
        </widget>
       </item>
       <item>
-       <widget class="QLabel" name="totals">
+       <widget class="QWidget" name="totalsWidget" native="true">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
           <horstretch>2</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
-        <property name="text">
-         <string>[Totals]
-[Tax]
-[etc...]</string>
-        </property>
-        <property name="alignment">
-         <set>Qt::AlignRight|Qt::AlignTop|Qt::AlignTrailing</set>
-        </property>
+        <layout class="QGridLayout" name="totalsGridLayout">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <property name="horizontalSpacing">
+          <number>8</number>
+         </property>
+         <property name="verticalSpacing">
+          <number>2</number>
+         </property>
+        </layout>
        </widget>
       </item>
      </layout>

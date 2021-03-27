@@ -489,12 +489,16 @@ void MainWindow::createNewSIMDB()
                 ",project   TEXT REFERENCES projects (name) ON UPDATE CASCADE "
             ");");
     q.exec("CREATE TABLE pr ( "
-                "num            INTEGER PRIMARY KEY "
-                ",date          DATE "
-                ",date_needed   DATE /*The day by which this is needed. Enter ASAP if it's urgent.*/ "
-                ",requested_by  INTEGER NOT NULL REFERENCES userdata (id) "
-                ",notes         TEXT "
-                ",status        INTEGER NOT NULL DEFAULT 0 "
+                "num                INTEGER PRIMARY KEY "
+                ",date              DATE "
+                ",date_needed       DATE /*The day by which this is needed. Enter ASAP if it's urgent.*/ "
+                ",requested_by      INTEGER NOT NULL REFERENCES userdata (id) "
+                ",project           TEXT NOT NULL REFERENCES projects (name) ON UPDATE CASCADE /*The project this is needed for*/ "
+                ",expected_tax_rate REAL "
+                ",expected_tax      REAL"
+                ",expected_total    REAL "
+                ",notes             TEXT "
+                ",status            INTEGER NOT NULL DEFAULT 0 "
             ");");
     /* STATUS FLAGS
      *      0 = DRAFT
@@ -504,15 +508,15 @@ void MainWindow::createNewSIMDB()
      *      4 = partially completed (at least one rejected)
      *      5 = completed (at least one rejected) */
     q.exec("CREATE TABLE prd ( "
-                "id                 INTEGER PRIMARY KEY "
-                ",pr_num            INTEGER NOT NULL REFERENCES pr (num) ON UPDATE CASCADE "
-                ",item_id           INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
-                ",supplier_id       INTEGER REFERENCES suppliers (id) /*The suggested supplier*/ "
-                ",project           TEXT NOT NULL REFERENCES projects (name) ON UPDATE CASCADE /*The project this is needed for*/ "
-                ",qty               REAL NOT NULL "
-                ",unit              TEXT "
-                ",expected_price    INTEGER "
-                ",is_open           INTEGER NOT NULL DEFAULT 1 /*0=closed-ordered,1=open-not-ordered,2=closed-rejected*/ "
+                "id                     INTEGER PRIMARY KEY "
+                ",pr_num                INTEGER NOT NULL REFERENCES pr (num) ON UPDATE CASCADE "
+                ",item_id               INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
+                ",supplier_id           INTEGER REFERENCES suppliers (id) /*The suggested supplier*/ "
+                ",qty                   REAL NOT NULL "
+                ",expected_unit_price   REAL "
+                ",taxable               BOOLEAN "
+                ",total                 REAL "
+                ",status                INTEGER NOT NULL DEFAULT 1 /*0=closed,1=open,2=rejected*/ "
             ");");
     q.exec("CREATE TABLE qr ( "
                 "num            INTEGER PRIMARY KEY "
@@ -636,7 +640,7 @@ void MainWindow::on_actionItem_History_triggered() //Every transaction in the In
     QSqlQuery qry(simdb);
     simdb.open();
     qry.exec("SELECT prd.supplier_id, '0', pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document Type', prd.pr_num AS 'Doc#', userdata.name As 'Created by' , prd.unit AS 'Unit'"
-    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', prd.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
+    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', pr.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
     "FROM prd "
     "LEFT JOIN pr ON prd.pr_num = pr.num "
     "LEFT JOIN suppliers ON suppliers.id = prd.supplier_id "
@@ -713,7 +717,7 @@ void MainWindow::createItem_Details_Table(QString itemid)
     qry.next();
     ui->ItemTableLabel->setText(QString("Movement History For: %1 || %2 ").arg(qry.value(0).toString(), qry.value(1).toString()));
     qry.exec(QString("SELECT prd.supplier_id, '0', pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document Type', prd.pr_num AS 'Doc#', userdata.name As 'Created by' , prd.unit AS 'Unit'"
-    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', prd.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
+    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', pr.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
     "FROM prd "
     "LEFT JOIN pr ON prd.pr_num = pr.num "
     "LEFT JOIN suppliers ON suppliers.id = prd.supplier_id "
@@ -790,14 +794,14 @@ void MainWindow::createProject_Details_Table(QString project)
         "LEFT JOIN items ON items.id = prd.item_id "
         "LEFT JOIN suppliers ON suppliers.id = prd.supplier_id "
         "LEFT JOIN userdata ON userdata.id = pr.requested_by "
-        "WHERE prd.project = '%1' "
+        "WHERE pr.project = '%1' "
         "UNION "
         "SELECT mrd.item_id, NULL, mr.authorized_by, userdata.name, mr.date, 'MR', mr.num, items.num, items.desc, mrd.unit, NULL, mrd.qty, NULL "
         "FROM mrd "
         "LEFT JOIN mr ON mr.num = mrd.mr_num "
         "LEFT JOIN items ON items.id = mrd.item_id "
         "LEFT JOIN userdata ON userdata.id = mr.authorized_by "
-        "WHERE mrd.project = '%1' "
+        "WHERE mr.project = '%1' "
         ";").arg(project));
     model->setQuery(qry);
     while (model->canFetchMore()) {model->fetchMore();}
@@ -846,7 +850,7 @@ void MainWindow::createSuppliers_Details_Table(QString supplier_id, QString supp
 
     QSqlQuery qry(simdb);
     simdb.open();
-    qry.exec(QString("SELECT prd.item_id, pr.requested_by, pr.date AS 'Date', userdata.name AS 'Creator', 'PR' AS 'Doc', prd.pr_num AS '#', prd.project AS 'Project', items.num AS 'Item ID' "
+    qry.exec(QString("SELECT prd.item_id, pr.requested_by, pr.date AS 'Date', userdata.name AS 'Creator', 'PR' AS 'Doc', prd.pr_num AS '#', pr.project AS 'Project', items.num AS 'Item ID' "
         ", items.desc AS 'Description' , prd.unit AS 'Unit', prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', NULL AS 'Qty Recd.', NULL As 'Unit Price', NULL AS 'Total' "
         "FROM prd "
         "LEFT JOIN pr ON pr.num = prd.pr_num "
@@ -891,7 +895,7 @@ void MainWindow::on_actionPurchase_Requisitions_triggered() //PR
     QSqlQuery qry(simdb);
     simdb.open();
     qry.exec("SELECT pr.requested_by, userdata.name AS 'Requested By', pr.date AS 'Date Created', pr.date_needed AS 'Date Needed', pr.num AS 'PR#' "
-        ",group_concat(DISTINCT prd.project) AS 'Project(s)', group_concat(DISTINCT suppliers.name) AS 'Recommended Supplier(s)' "
+        ",group_concat(DISTINCT pr.project) AS 'Project(s)', group_concat(DISTINCT suppliers.name) AS 'Recommended Supplier(s)' "
         ",CASE status "
             "WHEN 0 THEN 'Draft' "
             "WHEN 1 THEN 'Closed '"
@@ -929,7 +933,7 @@ void MainWindow::createPR_Details(QString prnum)
 
     QSqlQuery qry(simdb);
     simdb.open();
-    qry.exec(QString("SELECT userdata.name, pr.date, pr.date_needed "
+    qry.exec(QString("SELECT userdata.name, pr.date, pr.date_needed, pr.project "
         ",CASE pr.status "
             "WHEN 0 THEN 'Draft' "
             "WHEN 1 THEN 'Closed '"
@@ -946,15 +950,15 @@ void MainWindow::createPR_Details(QString prnum)
                                 .arg(prnum,qry.value(0).toString()));
     ui->ItemTableLabel2->setText(qry.value(1).toString());
     extra2 = QString("Status: %1\n").arg(qry.value(2).toString());
-    if (!(qry.value(3).toString() == ""))
-        extra2 = QString("%1Needed by: %2\n").arg(extra2, qry.value(3).toString());
+    if (!(qry.value(4).toString() == ""))
+        extra2 = QString("%1Needed by: %2\n").arg(extra2, qry.value(4).toString());
     ui->ExtraDetails2->setText(extra2);
-    qry.exec(QString("SELECT printf('%.2f', SUM(prd.expected_price * prd.qty)) FROM prd WHERE prd.pr_num = %1;").arg(prnum));
+    qry.exec(QString("SELECT printf('%.2f', SUM(prd.expected_unit_price * prd.qty)) FROM prd WHERE prd.pr_num = %1;").arg(prnum));
     qry.next();
     ui->Totals->setText(QString("Total $%1").arg(qry.value(0).toString()));
 
-    qry.exec(QString("SELECT prd.supplier_id, prd.item_id, suppliers.name AS 'Supplier', prd.project AS 'Project', items.num 'Item ID' "
-        ", items.desc AS 'Description', prd.qty AS 'Quantity', prd.unit AS 'Unit', printf('%.2f', prd.expected_price) AS 'Expected Price' "
+    qry.exec(QString("SELECT prd.supplier_id, prd.item_id, suppliers.name AS 'Supplier', items.num 'Item ID' , items.desc AS 'Description'"
+        ", items.cat AS 'Category', prd.qty AS 'Quantity', items.unit AS 'Unit', printf('%.2f', prd.expected_unit_price) AS 'Expected Price',  prd.total AS 'Total' "
         "FROM prd "
         "LEFT JOIN suppliers ON prd.supplier_id = suppliers.id "
         "LEFT JOIN items ON prd.item_id = items.id "

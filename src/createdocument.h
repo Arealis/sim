@@ -8,7 +8,11 @@
 #include <QLineEdit>
 #include <QKeyEvent>
 #include <QSqlQueryModel>
+#include <QStandardItemModel>
 #include <QMenu>
+#include <QLabel>
+#include <QCheckBox>
+#include <QGridLayout>
 
 class CreateDocument;
 
@@ -38,7 +42,7 @@ public:
         char supplier;
         char status;
         char total;
-        char tax;
+        char taxable;
         char project;
     };
 
@@ -46,13 +50,19 @@ public:
     QAction *deleteRow;
     columnId cid;
 
+    CreateDocument *parentDoc;
+
     int finalRow;
     int cfRow, customButtonRow;
     int priceCol, qtyCol;
 
+    double taxableSubtotal, taxExemptSubtotal;
+
     QStringList colNames;
 
     QSqlQueryModel *itemModel, *projectModel, *supplierModel;
+
+    void updateTotal(int row);
 
     void storeTableDetails(QSqlQuery qry, QString docnum, int tableFlag);
 
@@ -60,10 +70,21 @@ public:
 
     void appendRow();
 
+    void checkItem(QSqlQuery qry, int row);
+
+    void checkProject(QSqlQuery qry, int row);
+
+    void checkSupplier(QSqlQuery qry, int row);
+
     void resizeEvent(QResizeEvent *event);
 
-    enum lineType {Item, Project, Supplier};
-    void customLineEdit(int row, lineType type);
+    void initCompanionLineEdit(int row, int column, QLineEdit *sourceLine, QLineEdit *line2, QLineEdit *line3, QLineEdit *line4, QString cssValid, QString cssInvalid);
+
+    void changeCompletionModel(QLineEdit *line, QString itemId, QString value);
+
+    enum lineType {Item, Supplier, Blank};
+    void customLineEdit(int row, lineType type, int column = 0);
+    void customCheckBox(int row, int column);
 
     void initializeColumns(int tflag);
 
@@ -78,13 +99,25 @@ public:
     explicit CreateDocument(QWidget *parent = nullptr);
     ~CreateDocument();
 
-    int cfRow, customButtonRow;
+    int cfRow, customButtonRow, customExpenseRowStart, customExpenseRowCount, taxableAmountRow;
+    bool taxExempt, discBeforeTax;
 
     ResizableTable *table;
 
-    void setTotal(double total);
+    void initializeTotals();
+
+    void updateTotal(double total, bool isTaxExempt);
 
 private slots:
+
+    QLabel* createTotalsLabel(QLabel *nextSubtotal, int *row, QString title, QWidget *parent, QGridLayout *grid);
+    QLineEdit* createTotalsLineEdit(QLabel *nextSubtotal, int *row, QString title, QWidget *parent, QGridLayout *grid, bool expense = 1);
+    QFrame* createTotalsLine(int *row, QWidget *parent, QGridLayout *grid);
+
+    void setTotalsRowHidden(QGridLayout *grid, QFrame *widget, bool hidden);
+    void setTotalsRowHidden(QGridLayout *grid, QLineEdit *widget, bool hidden);
+    void setTotalsRowHidden(QGridLayout *grid, QLabel *widget, bool hidden);
+
     void on_addCustom_clicked();
 
     void on_save_clicked();
@@ -101,6 +134,8 @@ private slots:
 
     void deleteCustomDetail();
 
+    void deleteCustomExpense();
+
     void fetchDetails(QSqlQuery qry, int tFlag, QString docnum);
 
     void DeleteDocument();
@@ -108,6 +143,15 @@ private slots:
 private:
     Ui::CreateDocument *ui;
 };
+
+bool validateProject(QSqlQuery qry, QString project);
+QString validateSupplier(QSqlQuery qry, QString supplier, bool *newEntry);
+QString validateItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit, QString category);
+
+inline QString insertNewSupplier(QSqlQuery qry, QString supplier);
+inline QString insertNewItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit, QString category);
+
+void connectCompleterToLine(QLineEdit *line);
 
 QString returnStringINN(QVariant sqlValue, QString ifNotNull, QString ifNull);
 
