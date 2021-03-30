@@ -391,7 +391,7 @@ QFrame* CreateDocument::createTotalsLine(int *row, QWidget *parent, QGridLayout 
     line->setFrameShape(QFrame::HLine);
     line->setFrameShadow(QFrame::Sunken);
 
-    grid->addWidget(line, *row, 3);
+    grid->addWidget(line, *row, 2, 1, 2);
 
     *row = *row - 1;
     return line;
@@ -463,14 +463,15 @@ void CreateDocument::initializeTotals()
      * 1  | 0                   | Tax E. Subtotal         | 0                   | Tax E. Subtotal         | <       (sum of tax exempt items) . . . . . . . . . . . . . . . . . . . [if == 0]
      * 2  | Discount            | Discount On Taxable     | 0                   | 0                       | < user: discount on taxable subtotal . . . . . . [if !discountBeforeTax]
      * 3  | 0                   | Discount on Tax E.      | 0                   | 0                       | < user: discount on taxable subtotal . . . . . . [if !discountBeforeTax] [if sum of tax E. == 0]
-     *    | - - - - - - - - - - | - - - - - - - - - - - - | - - - - - - - - - - | - - - - - - - - - - - - |                                                  [if taxableDiscount == 0 && exemptDiscount == 0]
-     * 4  | Taxable Amount      | Taxable Amount          | Taxable Amount      | Taxable Amount          | <       (taxable subtotal - discount on taxable) [if taxableDiscount == 0 && exemptDiscount == 0]
-     * 5  | 0                   | Tax Exempt Amount       | 0                   | Tax Exempt Amount       | <       (tax E. subtotal - discount on tax E.) . [if taxableDiscount == 0 && exemptDiscount == 0]
-     * 6  | Tax                 | Tax                     | Tax                 | Tax                     | < user: tax rate (rate * taxable amount)
-     * 7  | 0                   | 0                       | Discount            | Discount                | < user: discount after tax . . . . . . . . . . . [if discountBeforeTax]
-     * 8  | Other               | Other                   | Other               | Other                   | < user: other expenses or discounts
-     *    | ...                 | ...                     | ...                 | ...                     | < user: any number of others
-     *    | Total               | Total                   | Total               | Total                   | <       （sum of all rows > 3)
+     * 4  | - - - - - - - - - - | - - - - - - - - - - - - | - - - - - - - - - - | - - - - - - - - - - - - |                                                  [if taxableDiscount == 0 && exemptDiscount == 0]
+     * 5  | Taxable Amount      | Taxable Amount          | Taxable Amount      | Taxable Amount          | <       (taxable subtotal - discount on taxable) [if taxableDiscount == 0 && exemptDiscount == 0]
+     * 6  | 0                   | Tax Exempt Amount       | 0                   | Tax Exempt Amount       | <       (tax E. subtotal - discount on tax E.) . [if taxableDiscount == 0 && exemptDiscount == 0]
+     * 7  | Tax                 | Tax                     | Tax                 | Tax                     | < user: tax rate (rate * taxable amount)
+     * 8  | 0                   | 0                       | Discount            | Discount                | < user: discount after tax . . . . . . . . . . . [if discountBeforeTax]
+     * 9  | Other               | Other                   | Other               | Other                   | < user: other expenses or discounts
+     * n  | ...                 | ...                     | ...                 | ...                     | < user: any number of others
+     * n+1| - - - - - - - - - - | - - - - - - - - - - - - | - - - - - - - - - - | - - - - - - - - - - - - |
+     * n+2| Total               | Total                   | Total               | Total                   | <       （sum of all rows > 3)
      *    +---------------------+-------------------------+---------------------+-------------------------+
      *      ^ This is default ^
      *
@@ -623,13 +624,7 @@ void CreateDocument::initializeTotals()
         ui->totalsGridLayout->getItemPosition(ui->totalsGridLayout->indexOf(addExpenseButton), &buttonRow, &trash, &trash, &trash);
         buttonIndex = ui->totalsGridLayout->indexOf(addExpenseButton);
 
-        //You CANNOT use replaceWidget() here because it messes with the order of indices, which is vital.
-        QLabel *totalLabel = qobject_cast<QLabel*>(ui->totalsGridLayout->itemAt(ui->totalsGridLayout->indexOf(total) - 1)->widget());
-        ui->totalsGridLayout->removeWidget(line2);
-        ui->totalsGridLayout->removeWidget(addExpenseLabel);
-        ui->totalsGridLayout->removeWidget(addExpenseButton);
-        ui->totalsGridLayout->removeWidget(totalLabel);
-        ui->totalsGridLayout->removeWidget(total);
+        qDebug() << buttonRow;
 
         QCheckBox *box = new QCheckBox(ui->totalsWidget);
 
@@ -656,22 +651,30 @@ void CreateDocument::initializeTotals()
         deleteExpenseButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         deleteExpenseButton->setStyleSheet("background-color: rgb(255, 0, 4);");
 
+        //You CANNOT use replaceWidget() here because it messes with the order of indices, which is vital.
+        QLabel *totalLabel = qobject_cast<QLabel*>(ui->totalsGridLayout->itemAt(ui->totalsGridLayout->indexOf(total) - 1)->widget());
+        ui->totalsGridLayout->removeWidget(line2);
+        ui->totalsGridLayout->removeWidget(addExpenseLabel);
+        ui->totalsGridLayout->removeWidget(addExpenseButton);
+        ui->totalsGridLayout->removeWidget(totalLabel);
+        ui->totalsGridLayout->removeWidget(total);
+
         ui->totalsGridLayout->addWidget(box, buttonRow, 0);
         ui->totalsGridLayout->addWidget(rate, buttonRow, 1);
         ui->totalsGridLayout->addWidget(label, buttonRow, 2);
         ui->totalsGridLayout->addWidget(amount, buttonRow, 3);
         ui->totalsGridLayout->addWidget(deleteExpenseButton, buttonRow, 4);
 
-        ui->totalsGridLayout->addWidget(line2, buttonRow+1, 3);
+        ui->totalsGridLayout->addWidget(addExpenseLabel, buttonRow+1, 2);
+        ui->totalsGridLayout->addWidget(addExpenseButton, buttonRow+1, 3);
 
-        ui->totalsGridLayout->addWidget(addExpenseLabel, buttonRow+2, 2);
-        ui->totalsGridLayout->addWidget(addExpenseButton, buttonRow+2, 3);
+        ui->totalsGridLayout->addWidget(line2, buttonRow+2, 2, 1, 2);
 
         ui->totalsGridLayout->addWidget(totalLabel, buttonRow+3, 2);
         ui->totalsGridLayout->addWidget(total, buttonRow+3, 3);
 
         connect(box, &QCheckBox::stateChanged,
-                [rate, amount] (int state)
+                [rate, amount, total] (int state)
         {
             if (state)
             {
@@ -681,6 +684,7 @@ void CreateDocument::initializeTotals()
                 rate->setEnabled(false);
                 amount->setEnabled(true);
             }
+            emit total->linkActivated("");
         });
 
         connect(rate, &QLineEdit::textEdited, [total] () { emit total->linkActivated(""); });
@@ -691,42 +695,59 @@ void CreateDocument::initializeTotals()
         {
             //This function deletes all items that are no longer used and then moves every item below it up by one
             //First, delete all items
-            customExpenseRowCount--;
-            int index = ui->totalsGridLayout->indexOf(rate) - 1;
-            int currentRow, trash;
-            ui->totalsGridLayout->getItemPosition(index, &currentRow, &trash, &trash, &trash);
+            int row, trash;
+            ui->totalsGridLayout->getItemPosition(ui->totalsGridLayout->indexOf(box), &row, &trash, &trash, &trash);
             QLayoutItem *child;
-            for (int i = 0; i < 5; i++)
+            for (int column = 0; column < 5; column++)
             {
-                child = ui->totalsGridLayout->takeAt(index);
+                child = ui->totalsGridLayout->itemAtPosition(row, column);
+                ui->totalsGridLayout->removeItem(child);
                 delete child->widget();
                 delete child;
             }
+            row++;
 
             //Second, move all custom items up by one (Fill in the vacuum left by deleted items
-            for (int i = (currentRow + customExpenseRowCount); currentRow < i; currentRow++)
+            for (int customExpenseRowEnd = customExpenseRowStart + customExpenseRowCount; row < customExpenseRowEnd; row++)
             {
-                for (int j = 0; j < 5; j++)
+                for (int column = 0; column < 5; column++)
                 {
-                    child = ui->totalsGridLayout->takeAt(index);
-                    ui->totalsGridLayout->addItem(child, currentRow, j);
-                    index++;
+                    child = ui->totalsGridLayout->itemAtPosition(row, column);
+                    ui->totalsGridLayout->removeItem(child);
+                    ui->totalsGridLayout->addItem(child, row-1, column);
                 }
             }
 
-            //Third move the line, expenseButton, expenseLabels, and total labels up by one
-            child = ui->totalsGridLayout->takeAt(index);
-            ui->totalsGridLayout->addItem(child, currentRow, 3);
-            index++;
-            currentRow++;
-            for (int i = (currentRow + 2); currentRow < i; currentRow++) {
-                for (int j = 2; j < 4; j++)
+            //Third, move the expenseButton, expenseLabels, line, and total labels up by one
+            /*
+            child = ui->totalsGridLayout->itemAtPosition(row, 2);
+            ui->totalsGridLayout->removeItem(child);
+            ui->totalsGridLayout->addItem(child, row-1, 2);
+            child = ui->totalsGridLayout->itemAtPosition(row, 3);
+            ui->totalsGridLayout->addItem(child, row-1, 3);
+            row++;
+
+            */
+
+            for (int i = row+3, skip = row+1; row < i; row++) {
+                for (int column = 2; column < 4; column++)
                 {
-                    child = ui->totalsGridLayout->takeAt(index);
-                    ui->totalsGridLayout->addItem(child, currentRow, 2);
-                    index++;
+                    if (row == skip) {
+                        child = ui->totalsGridLayout->itemAtPosition(row, column);
+                        ui->totalsGridLayout->removeItem(child);
+                        ui->totalsGridLayout->addItem(child, row-1, column, 1, 2);
+                        break;
+                    }
+                    else {
+                        child = ui->totalsGridLayout->itemAtPosition(row, column);
+                        ui->totalsGridLayout->removeItem(child);
+                        ui->totalsGridLayout->addItem(child, row-1, column);
+                    }
                 }
             }
+            customExpenseRowCount--;
+            qDebug() << ui->totalsGridLayout->rowCount() << ui->totalsGridLayout->columnCount();
+            emit total->linkActivated("");
         });
     });
 }
@@ -1331,15 +1352,15 @@ void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
 
 void ResizableTable::customCheckBox(int row, int column)
 {
-    QCheckBox *box = new QCheckBox();
+    QCheckBox *box = new QCheckBox(this);
     box->setObjectName("box");
     box->setChecked(true);
 
-    QHBoxLayout *layout = new QHBoxLayout();
+    QHBoxLayout *layout = new QHBoxLayout(this);
     layout->setAlignment(Qt::AlignCenter);
     layout->setContentsMargins(0,0,0,0);
 
-    QWidget *widget = new QWidget();
+    QWidget *widget = new QWidget(this);
 
     widget->setLayout(layout);
     layout->addWidget(box);
@@ -1425,9 +1446,9 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
         completer->setFilterMode(Qt::MatchContains);
         completer->setCaseSensitivity(Qt::CaseInsensitive);
 
-        QLineEdit *descLine = new QLineEdit();
-        QLineEdit *catLine = new QLineEdit();
-        QLineEdit *unitLine = new QLineEdit();
+        QLineEdit *descLine = new QLineEdit(this);
+        QLineEdit *catLine = new QLineEdit(this);
+        QLineEdit *unitLine = new QLineEdit(this);
 
         initCompanionLineEdit(row, cid.itemDesc, descLine, line, catLine, unitLine, cssclear1, cssalert1);
         initCompanionLineEdit(row, cid.unit, unitLine, line, descLine, catLine, cssclear1, cssalert1);
