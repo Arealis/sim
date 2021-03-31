@@ -104,11 +104,13 @@ public:
 
     ResizableTable *table;
 
-    void initializeTotals();
+    void initializeTotals(int tnum = 0);
 
     void updateTotal(double total, bool isTaxExempt);
 
 private slots:
+
+    void fetchRateAndAmount(QSqlQuery qry, int rateIndex, QLineEdit *line, QGridLayout *grid, bool custom = 0);
 
     QLabel* createTotalsLabel(QLabel *nextSubtotal, int *row, QString title, QWidget *parent, QGridLayout *grid);
     QLineEdit* createTotalsLineEdit(QLabel *nextSubtotal, int *row, QString title, QWidget *parent, QGridLayout *grid, bool expense = 1);

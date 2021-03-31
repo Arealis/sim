@@ -458,7 +458,7 @@ void MainWindow::createNewSIMDB()
                 ",desc  TEXT NOT NULL "
                 ",cat   TEXT NOT NULL DEFAULT 'unknown' "
                 ",qty   REAL NOT NULL DEFAULT 0 "
-                ",unit  TEXT "  //Real because these may be broken down
+                ",unit  TEXT "
                 ",shelf TEXT "	//Location of item in storage
                 ",bin   TEXT "	//Location of item in storage
            ");");
@@ -488,17 +488,33 @@ void MainWindow::createNewSIMDB()
                 ",item_id   INTEGER REFERENCES items (id) ON UPDATE CASCADE "
                 ",project   TEXT REFERENCES projects (name) ON UPDATE CASCADE "
             ");");
+    q.exec("CREATE TABLE custom_expenses ("
+                "id     INTEGER PRIMARY KEY "
+                ",tflag INTEGER NOT NULL "
+                ",tnum  INTEGER NOT NULL "
+                ",name  TEXT NOT NULL "
+                ",rate  REAL NOT NULL " //If the rate is 0, then the rate checkbox was not clicked
+                ",value REAL NOT NULL "
+            ");");
     q.exec("CREATE TABLE pr ( "
-                "num                INTEGER PRIMARY KEY "
-                ",date              DATE "
-                ",date_needed       DATE /*The day by which this is needed. Enter ASAP if it's urgent.*/ "
-                ",requested_by      INTEGER NOT NULL REFERENCES userdata (id) "
-                ",project           TEXT NOT NULL REFERENCES projects (name) ON UPDATE CASCADE /*The project this is needed for*/ "
-                ",expected_tax_rate REAL "
-                ",expected_tax      REAL"
-                ",expected_total    REAL "
-                ",notes             TEXT "
-                ",status            INTEGER NOT NULL DEFAULT 0 "
+                "num                            INTEGER PRIMARY KEY "
+                ",date                          DATE "
+                ",date_needed                   DATE /*The day by which this is needed. Enter ASAP if it's urgent.*/ "
+                ",requested_by                  INTEGER NOT NULL REFERENCES userdata (id) "
+                ",project                       TEXT NOT NULL REFERENCES projects (name) ON UPDATE CASCADE /*The project this is needed for*/ "
+                ",taxable_subtotal              REAL " // This is just for storage. Whenever a document is
+                ",tax_exempt_subtotal           REAL " // opened this will be calculated on the fly
+                ",discount_on_taxable_rate      REAL "
+                ",discount_on_taxable           REAL "
+                ",discount_on_tax_exempt_rate   REAL "
+                ",discount_on_tax_exempt        REAL "
+                ",discount_after_tax_rate       REAL "
+                ",discount_after_tax            REAL "
+                ",tax_rate                      REAL "
+                ",tax                           REAL "
+                ",total                         REAL "
+                ",notes                         TEXT "
+                ",status                        INTEGER NOT NULL DEFAULT 0 "
             ");");
     /* STATUS FLAGS
      *      0 = DRAFT

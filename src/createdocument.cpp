@@ -423,7 +423,7 @@ void CreateDocument::setTotalsRowHidden(QGridLayout *grid, QFrame *widget, bool 
 }
 
 
-void CreateDocument::initializeTotals()
+void CreateDocument::initializeTotals(int tnum)
 {
     /* This is the most complex part of the CreateDocument window, and I'd like to simplify it in the future. This is how it works for now.
      *
@@ -624,8 +624,6 @@ void CreateDocument::initializeTotals()
         ui->totalsGridLayout->getItemPosition(ui->totalsGridLayout->indexOf(addExpenseButton), &buttonRow, &trash, &trash, &trash);
         buttonIndex = ui->totalsGridLayout->indexOf(addExpenseButton);
 
-        qDebug() << buttonRow;
-
         QCheckBox *box = new QCheckBox(ui->totalsWidget);
 
         QLineEdit *rate = new QLineEdit(ui->totalsWidget);
@@ -718,17 +716,7 @@ void CreateDocument::initializeTotals()
                 }
             }
 
-            //Third, move the expenseButton, expenseLabels, line, and total labels up by one
-            /*
-            child = ui->totalsGridLayout->itemAtPosition(row, 2);
-            ui->totalsGridLayout->removeItem(child);
-            ui->totalsGridLayout->addItem(child, row-1, 2);
-            child = ui->totalsGridLayout->itemAtPosition(row, 3);
-            ui->totalsGridLayout->addItem(child, row-1, 3);
-            row++;
-
-            */
-
+            //Last, move the expenseButton, expenseLabels, line, and total labels up by one
             for (int i = row+3, skip = row+1; row < i; row++) {
                 for (int column = 2; column < 4; column++)
                 {
@@ -746,23 +734,63 @@ void CreateDocument::initializeTotals()
                 }
             }
             customExpenseRowCount--;
-            qDebug() << ui->totalsGridLayout->rowCount() << ui->totalsGridLayout->columnCount();
             emit total->linkActivated("");
         });
     });
+
+    if (tnum != 0)
+    {
+        QSqlDatabase simdb = QSqlDatabase::database("sim", false);
+        QSqlQuery qry = QSqlQuery(simdb);
+        simdb.open();
+        qry.exec("SELECT discount_on_taxable_rate, discount_on_taxable, discount_on_tax_exempt_rate, discount_on_tax_exempt "
+            ",tax_rate, tax, discount_after_tax_rate, discount_after_tax "
+            "FROM "%docname%"WHERE num = "%QString::number(tnum)%";");
+        qry.next();
+        fetchRateAndAmount(qry, 0, discountOnTaxable, ui->totalsGridLayout);
+        fetchRateAndAmount(qry, 2, discountOnTaxExempt, ui->totalsGridLayout);
+        fetchRateAndAmount(qry, 4, tax, ui->totalsGridLayout);
+        fetchRateAndAmount(qry, 6, discountAfterTax, ui->totalsGridLayout);
+
+        int row = customExpenseRowStart;
+        qry.exec("SELECT name, rate, value FROM custom_expenses WHERE tflag = "%tflag%" AND tnum = "%QString::number(tnum)%";");
+        while (qry.next())
+        {
+            emit addExpenseButton->clicked();
+            fetchRateAndAmount(qry, 1, qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(row, 3)->widget()), ui->totalsGridLayout, 1);
+            row++;
+        }
+    }
+}
+
+void CreateDocument::fetchRateAndAmount(QSqlQuery qry, int rateIndex, QLineEdit *line, QGridLayout *grid, bool custom)
+{
+    int row, trash;
+    grid->getItemPosition(grid->indexOf(line), &row, &trash, &trash, &trash);
+
+    if (qry.value(rateIndex).toDouble() == 0)
+    {
+        qobject_cast<QCheckBox*>(grid->itemAtPosition(row, 0)->widget())->setChecked(false);
+        line->setText(qry.value(rateIndex+1).toString());
+    } else {
+        qobject_cast<QCheckBox*>(grid->itemAtPosition(row, 0)->widget())->setChecked(true);
+        qobject_cast<QLineEdit*>(grid->itemAtPosition(row, 1)->widget())->setText(qry.value(rateIndex).toString());
+    }
+    if (custom)
+        qobject_cast<QLineEdit*>(grid->itemAtPosition(row, 2)->widget())->setText(qry.value(rateIndex-1).toString());
 }
 
 void CreateDocument::deleteCustomExpense()
 {
-    //This may cause memory leaks. Verify.
     QPushButton *button = qobject_cast<QPushButton *>(sender());
+    QLayoutItem *child;
     int index = ui->gridLayout->indexOf(button);
-    ui->totalsGridLayout->itemAt(index-0)->widget()->~QWidget();
-    ui->totalsGridLayout->itemAt(index-0)->~QLayoutItem();
-    ui->totalsGridLayout->itemAt(index-1)->widget()->~QWidget();
-    ui->totalsGridLayout->itemAt(index-1)->~QLayoutItem();
-    ui->totalsGridLayout->itemAt(index-2)->widget()->~QWidget();
-    ui->totalsGridLayout->itemAt(index-2)->~QLayoutItem();
+    for (int i = 0; i < 3; i++)
+    {
+        child = ui->totalsGridLayout->takeAt(index - i);
+        delete child->widget();
+        delete child;
+    }
     customButtonRow--;
 }
 
