@@ -128,6 +128,8 @@ private slots:
 
     void on_saveDraft_clicked();
 
+    void storeCustomExpenses(QSqlQuery qry);
+
     void storeTable(int tableFlag, QString oldDocNum, QString newDocNum);
 
     void insertRecurringCustomDetails(QSqlQuery qry, QString tableFlag, int *row);

@@ -492,8 +492,8 @@ void MainWindow::createNewSIMDB()
                 "id     INTEGER PRIMARY KEY "
                 ",tflag INTEGER NOT NULL "
                 ",tnum  INTEGER NOT NULL "
-                ",name  TEXT NOT NULL "
-                ",rate  REAL NOT NULL " //If the rate is 0, then the rate checkbox was not clicked
+                ",name  TEXT "
+                ",rate  REAL " //If the rate is 0, then the rate checkbox was not clicked
                 ",value REAL NOT NULL "
             ");");
     q.exec("CREATE TABLE pr ( "
@@ -502,6 +502,7 @@ void MainWindow::createNewSIMDB()
                 ",date_needed                   DATE /*The day by which this is needed. Enter ASAP if it's urgent.*/ "
                 ",requested_by                  INTEGER NOT NULL REFERENCES userdata (id) "
                 ",project                       TEXT NOT NULL REFERENCES projects (name) ON UPDATE CASCADE /*The project this is needed for*/ "
+                ",discount_before_tax           BOOL DEFAULT 1 "
                 ",taxable_subtotal              REAL " // This is just for storage. Whenever a document is
                 ",tax_exempt_subtotal           REAL " // opened this will be calculated on the fly
                 ",discount_on_taxable_rate      REAL "
@@ -732,7 +733,7 @@ void MainWindow::createItem_Details_Table(QString itemid)
     qry.exec(QString("SELECT num, desc FROM items WHERE id = %1;").arg(itemid));
     qry.next();
     ui->ItemTableLabel->setText(QString("Movement History For: %1 || %2 ").arg(qry.value(0).toString(), qry.value(1).toString()));
-    qry.exec(QString("SELECT prd.supplier_id, '0', pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document Type', prd.pr_num AS 'Doc#', userdata.name As 'Created by' , prd.unit AS 'Unit'"
+    qry.exec(QString("SELECT prd.supplier_id, '0', pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document Type', pr.num AS 'Doc#', userdata.name As 'Created by' /*,items.unit AS 'Unit'*/"
     ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', pr.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
     "FROM prd "
     "LEFT JOIN pr ON prd.pr_num = pr.num "
@@ -740,27 +741,27 @@ void MainWindow::createItem_Details_Table(QString itemid)
     "LEFT JOIN userdata ON userdata.id = pr.requested_by "
     "WHERE prd.item_id = %1 "
     "UNION "
-    "SELECT po.supplier_id, '1', po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, pod.unit, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
+    "SELECT po.supplier_id, '1', po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name /*,items.unit*/, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
     "FROM pod "
     "LEFT JOIN po ON pod.po_num = po.num "
     "LEFT JOIN suppliers ON suppliers.id = po.supplier_id "
     "LEFT JOIN userdata ON userdata.id = po.authorized_by "
     "WHERE pod.item_id = %1 "
     "UNION "
-    "SELECT rr.supplier_id, '2', rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, rrd.unit, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
+    "SELECT rr.supplier_id, '2', rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name /*,items.unit*/, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
     "FROM rrd "
     "LEFT JOIN rr ON rrd.rr_num = rr.num "
     "LEFT JOIN suppliers ON suppliers.id = rr.supplier_id "
     "LEFT JOIN userdata ON userdata.id = rr.inspected_by "
     "WHERE rrd.item_id = %1 "
     "UNION "
-    "SELECT NULL, '3', mr.authorized_by, mr.date, 'Material Requisition', mrd.mr_num, userdata.name, mrd.unit, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
+    "SELECT NULL, '3', mr.authorized_by, mr.date, 'Material Requisition', mrd.mr_num, userdata.name /*,items.unit*/, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
     "FROM mrd "
     "LEFT JOIN mr ON mrd.mr_num = mr.num "
     "LEFT JOIN userdata ON userdata.id = mr.authorized_by "
     "WHERE mrd.item_id = %1 "
     ";").arg(itemid));
-    //Should probably include authorizer, siblinds, and other info
+    //Should probably include authorizer, siblings, units, and other info
     model->setQuery(qry);
     while (model->canFetchMore()) {model->fetchMore();}
     simdb.close();
@@ -804,7 +805,7 @@ void MainWindow::createProject_Details_Table(QString project)
     QSqlQuery qry(simdb);
     simdb.open();
     qry.exec(QString("SELECT prd.item_id, prd.supplier_id, pr.requested_by, userdata.name AS 'Creator', pr.date, 'PR' AS 'Doc', pr.num AS '#', items.num AS 'Item ID'"
-        ", items.desc AS 'Description', prd.unit AS 'Unit', prd.qty AS 'Qty Reqd.', NULL AS 'Qty Dist.', suppliers.name AS 'Supplier' "
+        ", items.desc AS 'Description', items.unit AS 'Unit', prd.qty AS 'Qty Reqd.', NULL AS 'Qty Dist.', suppliers.name AS 'Supplier' "
         "FROM prd "
         "LEFT JOIN pr ON pr.num = prd.pr_num "
         "LEFT JOIN items ON items.id = prd.item_id "
@@ -812,7 +813,7 @@ void MainWindow::createProject_Details_Table(QString project)
         "LEFT JOIN userdata ON userdata.id = pr.requested_by "
         "WHERE pr.project = '%1' "
         "UNION "
-        "SELECT mrd.item_id, NULL, mr.authorized_by, userdata.name, mr.date, 'MR', mr.num, items.num, items.desc, mrd.unit, NULL, mrd.qty, NULL "
+        "SELECT mrd.item_id, NULL, mr.authorized_by, userdata.name, mr.date, 'MR', mr.num, items.num, items.desc, items.unit, NULL, mrd.qty, NULL "
         "FROM mrd "
         "LEFT JOIN mr ON mr.num = mrd.mr_num "
         "LEFT JOIN items ON items.id = mrd.item_id "
@@ -840,10 +841,8 @@ void MainWindow::on_actionSuppliers_triggered() //Suppliers
 
     QSqlQuery qry(simdb);
     simdb.open();
-    qry.exec("SELECT s.id, s.name AS 'Supplier', countries.name AS 'Country', s.contact_name AS 'Contact', s.email AS 'email', s.phone AS 'Phone' "
+    qry.exec("SELECT s.id, s.name AS 'Supplier', s.contact_name AS 'Contact', s.email AS 'email', s.phone AS 'Phone' "
         "FROM suppliers AS 's' "
-        "LEFT JOIN addresses ON addresses.id = s.address_id "
-        "LEFT JOIN countries ON addresses.country = countries.code "
         ";");
     model->setQuery(qry);
     while (model->canFetchMore()) { model->fetchMore(); }
@@ -867,21 +866,21 @@ void MainWindow::createSuppliers_Details_Table(QString supplier_id, QString supp
     QSqlQuery qry(simdb);
     simdb.open();
     qry.exec(QString("SELECT prd.item_id, pr.requested_by, pr.date AS 'Date', userdata.name AS 'Creator', 'PR' AS 'Doc', prd.pr_num AS '#', pr.project AS 'Project', items.num AS 'Item ID' "
-        ", items.desc AS 'Description' , prd.unit AS 'Unit', prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', NULL AS 'Qty Recd.', NULL As 'Unit Price', NULL AS 'Total' "
+        ", items.desc AS 'Description' , items.unit AS 'Unit', prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', NULL AS 'Qty Recd.', NULL As 'Unit Price', NULL AS 'Total' "
         "FROM prd "
         "LEFT JOIN pr ON pr.num = prd.pr_num "
         "LEFT JOIN items ON items.id = prd.item_id "
         "LEFT JOIN userdata ON userdata.id = pr.requested_by "
         "WHERE prd.supplier_id = %1 "
         "UNION "
-        "SELECT pod.item_id, po.authorized_by, po.date, userdata.name, 'PO', pod.po_num, NULL, items.num, items.desc, pod.unit, NULL, pod.qty, NULL, pod.unit_price, pod.price "
+        "SELECT pod.item_id, po.authorized_by, po.date, userdata.name, 'PO', pod.po_num, NULL, items.num, items.desc, items.unit, NULL, pod.qty, NULL, pod.unit_price, pod.price "
         "FROM pod "
         "LEFT JOIN po ON po.num = pod.po_num "
         "LEFT JOIN items ON items.id = pod.item_id "
         "LEFT JOIN userdata ON userdata.id = po.authorized_by "
         "WHERE po.supplier_id = '%1' "
         "UNION "
-        "SELECT rrd.item_id, rr.inspected_by, rr.date, userdata.name, 'RR', rrd.rr_num, NULL, items.num, items.desc, rrd.unit, NULL, NULL, rrd.qty "
+        "SELECT rrd.item_id, rr.inspected_by, rr.date, userdata.name, 'RR', rrd.rr_num, NULL, items.num, items.desc, items.unit, NULL, NULL, rrd.qty "
         ", (SELECT pod.unit_price WHERE pod.item_id = rrd.item_id), (SELECT pod.unit_price WHERE pod.item_id = rrd.item_id) * rrd.qty "
         "FROM rrd "
         "LEFT JOIN rr ON rr.num = rrd.rr_num "
@@ -912,7 +911,7 @@ void MainWindow::on_actionPurchase_Requisitions_triggered() //PR
     simdb.open();
     qry.exec("SELECT pr.requested_by, userdata.name AS 'Requested By', pr.date AS 'Date Created', pr.date_needed AS 'Date Needed', pr.num AS 'PR#' "
         ",group_concat(DISTINCT pr.project) AS 'Project(s)', group_concat(DISTINCT suppliers.name) AS 'Recommended Supplier(s)' "
-        ",CASE status "
+        ",CASE pr.status "
             "WHEN 0 THEN 'Draft' "
             "WHEN 1 THEN 'Closed '"
             "WHEN 2 THEN 'Partial' "
@@ -1264,6 +1263,7 @@ void MainWindow::on_ItemTable_doubleClicked(const QModelIndex &index)
             tflag = "0";
             CreateDocument h;
             h.setWindowTitle("Edit Purchase Order Draft #"+docnum);
+            h.setWindowFlags(Qt::Window);
             h.exec();
         } else
             createPR_Details(index.siblingAtColumn(SIM_PR_NUM).data().toString());

@@ -63,6 +63,9 @@ CreateDocument::CreateDocument(QWidget *parent) :
     //      THIRD: Set up elements and/or hide elements that are document specific
     switch (tflag.toInt()) {
     case 0: { //If PR
+        ui->doctype->setText("Purchase Requisition #");
+        docname = "pr";
+
         ui->shipToLabel->hide();
         ui->shippingAddress->hide();
         ui->supplierLabel->hide();
@@ -77,7 +80,7 @@ CreateDocument::CreateDocument(QWidget *parent) :
         ui->invoiceLabel->hide();
         ui->invoicenum->hide();
 
-        initializeTotals();
+        initializeTotals(docnum.toInt());
 
         QCompleter *completer = new QCompleter(table->projectModel, ui->project);
         completer->setFilterMode(Qt::MatchContains);
@@ -93,12 +96,12 @@ CreateDocument::CreateDocument(QWidget *parent) :
                     else
                         ui->project->setStyleSheet(cssalert1);
                 });
-
-        ui->doctype->setText("Purchase Requisition #");
-        docname = "pr";
         break;
     }
     case 1: { //If QR
+        ui->doctype->setText("Quotation Request #");
+        docname = "qr";
+
         ui->qrLabel->hide();
         ui->qrnum->hide();
         ui->poLabel->hide();
@@ -106,20 +109,18 @@ CreateDocument::CreateDocument(QWidget *parent) :
         ui->invoiceLabel->hide();
         ui->invoicenum->hide();
 
-        ui->doctype->setText("Quotation Request #");
-        docname = "qr";
         break;
     }
     case 2: { //If PO
-        ui->shippingAddress->setText(qry.value(5).toString());
         ui->doctype->setText("Purchase Order #");
         docname = "po";
+        ui->shippingAddress->setText(qry.value(5).toString());
         break;
     }
     case 3: { //If RR
-        ui->shipToWidget->hide();
         ui->doctype->setText("Receiving Report #");
         docname = "rr";
+        ui->shipToWidget->hide();
         break;
     }
     case 4: { //If MR
@@ -303,6 +304,7 @@ QLineEdit* CreateDocument::createTotalsLineEdit(QLabel *nextSubtotal, int *row, 
         } else {
             rate->setEnabled(false);
             amount->setEnabled(true);
+            rate->clear();
         }
     });
 
@@ -423,7 +425,7 @@ void CreateDocument::setTotalsRowHidden(QGridLayout *grid, QFrame *widget, bool 
 }
 
 
-void CreateDocument::initializeTotals(int tnum)
+void CreateDocument::initializeTotals(int tnum) //Need to fix how qrys are handled. It messes the open/close flow often.
 {
     /* This is the most complex part of the CreateDocument window, and I'd like to simplify it in the future. This is how it works for now.
      *
@@ -489,7 +491,7 @@ void CreateDocument::initializeTotals(int tnum)
 
     QCheckBox *discountBeforeTax = new QCheckBox("Discount Before Tax", ui->internalWidget);
     discountBeforeTax->setChecked(true);
-    ui->internalDetailsGridLayout->addWidget(discountBeforeTax, (ui->internalDetailsGridLayout->rowCount() + 1), 0, 1, 2);
+    ui->internalDetailsGridLayout->addWidget(discountBeforeTax, ui->internalDetailsGridLayout->rowCount(), 0, 1, 2);
 
     //Declare everything so we can work from the top down
     QLabel *taxableSubtotal, *taxExemptSubtotal, *taxableAmount, *taxExemptAmount, *total, *addExpenseLabel;
@@ -534,11 +536,8 @@ void CreateDocument::initializeTotals(int tnum)
             discountAfterTax->setText("0.00");
             setTotalsRowHidden(ui->totalsGridLayout, discountAfterTax, true);
             setTotalsRowHidden(ui->totalsGridLayout, discountOnTaxable, false);
-            setTotalsRowHidden(ui->totalsGridLayout, taxableAmount ,false);
-            setTotalsRowHidden(ui->totalsGridLayout, line1, false);
             if (taxExempt)
             {
-                setTotalsRowHidden(ui->totalsGridLayout, taxExemptAmount, false);
                 setTotalsRowHidden(ui->totalsGridLayout, discountOnTaxExempt, false);
             }
             discBeforeTax = true;
@@ -569,16 +568,15 @@ void CreateDocument::initializeTotals(int tnum)
         } else {
             setTotalsRowHidden(ui->totalsGridLayout, taxExemptSubtotal, false);
             if (discBeforeTax)
-            {
-                setTotalsRowHidden(ui->totalsGridLayout, taxExemptAmount, false);
                 setTotalsRowHidden(ui->totalsGridLayout, discountOnTaxExempt, false);
-            }
+            if (discountOnTaxable->text().toDouble() != 0)
+                setTotalsRowHidden(ui->totalsGridLayout, taxExemptAmount, false);
             taxExempt = true;
         }
         emit taxableAmount->linkActivated("");
     });
 
-    connect(discountOnTaxable, &QLineEdit::textEdited,
+    connect(discountOnTaxable, &QLineEdit::textChanged,
             [=] (const QString &text)
     {
         if (text.toDouble() == 0 && discountOnTaxExempt->text().toDouble() == 0)
@@ -595,7 +593,7 @@ void CreateDocument::initializeTotals(int tnum)
         emit taxableAmount->linkActivated("");
     });
 
-    connect(discountOnTaxExempt, &QLineEdit::textEdited,
+    connect(discountOnTaxExempt, &QLineEdit::textChanged,
             [=] (const QString &text)
     {
         if (text.toDouble() == 0 && discountOnTaxable->text().toDouble() == 0)
@@ -681,6 +679,7 @@ void CreateDocument::initializeTotals(int tnum)
             } else {
                 rate->setEnabled(false);
                 amount->setEnabled(true);
+                rate->clear();
             }
             emit total->linkActivated("");
         });
@@ -744,9 +743,10 @@ void CreateDocument::initializeTotals(int tnum)
         QSqlQuery qry = QSqlQuery(simdb);
         simdb.open();
         qry.exec("SELECT discount_on_taxable_rate, discount_on_taxable, discount_on_tax_exempt_rate, discount_on_tax_exempt "
-            ",tax_rate, tax, discount_after_tax_rate, discount_after_tax "
-            "FROM "%docname%"WHERE num = "%QString::number(tnum)%";");
+            ",tax_rate, tax, discount_after_tax_rate, discount_after_tax, discount_before_tax "
+            "FROM "%docname%" WHERE num = "%QString::number(tnum)%";");
         qry.next();
+        discountBeforeTax->setChecked(qry.value(8).toBool());
         fetchRateAndAmount(qry, 0, discountOnTaxable, ui->totalsGridLayout);
         fetchRateAndAmount(qry, 2, discountOnTaxExempt, ui->totalsGridLayout);
         fetchRateAndAmount(qry, 4, tax, ui->totalsGridLayout);
@@ -760,6 +760,7 @@ void CreateDocument::initializeTotals(int tnum)
             fetchRateAndAmount(qry, 1, qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(row, 3)->widget()), ui->totalsGridLayout, 1);
             row++;
         }
+
     }
 }
 
@@ -860,11 +861,12 @@ void CreateDocument::fetchDetails(QSqlQuery qry, int tFlag, QString docnum)
     switch (tFlag) {
     case 0: {
         ui->detailsNames->setText("Date:\nCreated by:");
-        qry.exec("SELECT pr.date, pr.date_needed, pr.notes, userdata.name FROM pr JOIN userdata ON userdata.id = pr.requested_by WHERE pr.num = "+docnum+";");
+        qry.exec("SELECT pr.date, pr.date_needed, pr.notes, userdata.name, pr.project FROM pr JOIN userdata ON userdata.id = pr.requested_by WHERE pr.num = "+docnum+";");
         qry.next();
         ui->detailsValues->setText(qry.value(0).toString()+"\n"+qry.value(3).toString());
         ui->dateNeeded->setDate(qry.value(1).toDate());
         ui->notes->setPlainText(qry.value(2).toString());
+        ui->project->setText(qry.value(4).toString());
     }
     case 1: {
 
@@ -1145,6 +1147,20 @@ QString validateItem(bool *newEntry, QSqlQuery qry, QString itemNum, QString ite
     }
 }
 
+void CreateDocument::storeCustomExpenses(QSqlQuery qry)
+{
+    for (int row = 0; row < customExpenseRowCount; row++)
+    {
+        qry.exec("INSERT INTO custom_expenses (tflag, tnum, name, rate, value) VALUES ("
+                 %tflag
+                 %","%docnum
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(customExpenseRowStart+row,2)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(customExpenseRowStart+row,1)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(customExpenseRowStart+row,3)->widget())->text())
+            %");");
+    }
+}
+
 void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDocNum)
 {
     //This function saves the table as a draft that can be opened later
@@ -1156,17 +1172,35 @@ void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDoc
     qry.exec("DELETE FROM "%docname%"d WHERE "%docname%"_num = "%oldDocNum%";");
     qry.exec("DELETE FROM "%docname%" WHERE num = "%oldDocNum%";");
     qry.exec("DELETE FROM custom_fields WHERE tnum = "%oldDocNum%" AND tflag = "%QString::number(tableFlag)%";");
+    qry.exec("DELETE FROM custom_expenses WHERE tnum = "%oldDocNum%" AND tflag = "%QString::number(tableFlag)%";");
 
     //Check whether the columns are valid, and insert into the appropriate tables.
     switch (tableFlag) {
     case 0: { //PR
         validateProject(qry, ui->project->text());
-        qry.exec(QString("INSERT INTO pr (num, date, date_needed, requested_by, notes, status, project) VALUES (%1,datetime('now','localtime'),'%2',%3,%4,0,%5);")
-                 .arg(newDocNum
-                      ,ui->dateNeeded->date().toString("yyyy-MM-dd")
-                      ,currentUser
-                      ,escapeSql(ui->notes->toPlainText())
-                      ,escapeSql(ui->project->text())));
+        qry.exec("INSERT INTO pr (num, date, date_needed, requested_by, notes, status, project, discount_before_tax, taxable_subtotal, tax_exempt_subtotal, discount_on_taxable_rate"
+            ",discount_on_taxable, discount_on_tax_exempt_rate, discount_on_tax_exempt, tax_rate, tax, discount_after_tax_rate, discount_after_tax, total) VALUES ("
+                 %newDocNum
+                 %",datetime('now','localtime')"
+                 %",'"%ui->dateNeeded->date().toString("yyyy-MM-dd")%"'"
+                 %","%currentUser
+                 %","%escapeSql(ui->notes->toPlainText())
+                 %",0"
+                 %","%escapeSql(ui->project->text())
+                 %","%QString::number(qobject_cast<QCheckBox*>(ui->internalDetailsGridLayout->itemAtPosition(ui->internalDetailsGridLayout->rowCount()-1,0)->widget())->isChecked())
+                 %","%escapeSql(qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(0,3)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(1,3)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(2,1)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(2,3)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(3,1)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(3,3)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(7,1)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(7,3)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(8,1)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(8,3)->widget())->text())
+                 %","%escapeSql(qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(customExpenseRowStart+customExpenseRowCount+2,3)->widget())->text())
+            %");");
+        storeCustomExpenses(qry);
         table->storeTableDetails(qry, newDocNum, tableFlag);
         break;
     }
@@ -1177,6 +1211,7 @@ void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDoc
         break;
     }
     }
+    //Insert custom expenses.
     //Insert custom rows. This should become a function.
     QString customName, customValue;
     for (int i = 1; i < cfRow; i++)
@@ -1322,7 +1357,7 @@ void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
         "FROM prd "
         "LEFT JOIN items ON items.id = prd.item_id "
         "LEFT JOIN suppliers ON prd.supplier_id = suppliers.id "
-        "WHERE prd.pr_num = "+docnum+";");
+        "WHERE prd.pr_num = "%docnum%";");
         break;
     }
     case 1: {
@@ -1354,19 +1389,19 @@ void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
         break;
     }
     }
-    //Table items can have a line edit as their primary display. The following loop accounts for this. Table creation could use a refactor tho.
+    //Table items can have a line edit as their primary display. The following loop accounts for this.
     for (int i = 0; qry.next(); i++)
     {
         for (int j = 0; j < colNames.count(); j++)
         {
-            if (QLineEdit *line = qobject_cast<QLineEdit*>(cellWidget(i,j)))
-            {
-                line->setText(qry.value(j).toString());
-                line->completer()->setCompletionPrefix(qry.value(j).toString());
-                emit line->editingFinished();
+            if (QLineEdit *line = qobject_cast<QLineEdit*>(cellWidget(i,j))) {
+                if (line->objectName() == "item" || line->objectName() == "supplier") {
+                    line->setText(qry.value(j).toString());
+                    line->completer()->setCompletionPrefix(qry.value(j).toString());
+                    emit line->editingFinished();
+                }
             }
-            else if (QCheckBox *box = cellWidget(i,j)->findChild<QCheckBox*>("box"))
-            {
+            else if (QCheckBox *box = cellWidget(i,j)->findChild<QCheckBox*>("box")) {
                 if (qry.value(j).toBool())
                     box->setChecked(true);
                 else
@@ -1401,17 +1436,18 @@ void ResizableTable::customCheckBox(int row, int column)
     });
 }
 
-//The following function exists because editingFinished does not when QCompleter is activated by clicking
+//The following function exists because editingFinished is not emitted when QCompleter is activated by clicking
 void connectCompleterToLine(QLineEdit *line)
 {
-    QObject::connect(line->completer(), static_cast<void (QCompleter::*)(const QModelIndex &index)>(&QCompleter::activated),
+    QObject::connect(line->completer(), static_cast<void(QCompleter::*)(const QModelIndex &index)>(&QCompleter::activated),
             [line] () { emit line->editingFinished(); } );
 }
 
-//This could be made quicker by subclassing a QLineEdit and creating a new property for to check whether it is valid or not
+//This could be made quicker by subclassing a QLineEdit and creating a new property for checking whether it is valid or not
 inline void ResizableTable::initCompanionLineEdit(int row, int column, QLineEdit *sourceLine, QLineEdit *line2, QLineEdit *line3, QLineEdit *line4, QString cssValid, QString cssInvalid)
 {
     sourceLine->setFrame(false);
+    sourceLine->setContentsMargins(1,1,1,1);
     sourceLine->setProperty("ok", 1);
     QStandardItemModel *model = new QStandardItemModel(1,2,sourceLine);
     model->setObjectName("model");
@@ -1466,13 +1502,15 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
 {
     QLineEdit *line = new QLineEdit(this);
     line->setFrame(false);
+    line->setContentsMargins(1,1,1,1);
     //For now, these columns will always be in the same place.
     switch (type) {
     case Item: {
+        line->setObjectName("item");
         QCompleter *completer = new QCompleter(itemModel, line);
         completer->setCompletionColumn(1);
         completer->setFilterMode(Qt::MatchContains);
-        completer->setCaseSensitivity(Qt::CaseInsensitive);
+        completer->setCaseSensitivity(Qt::CaseSensitive); //I would like these completers to be case insensitive, but it causes problems right now when two different items are identical except for the cases.
 
         QLineEdit *descLine = new QLineEdit(this);
         QLineEdit *catLine = new QLineEdit(this);
@@ -1528,10 +1566,11 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
         break;
     }
     case Supplier: {
+        line->setObjectName("supplier");
         QCompleter *completer = new QCompleter(supplierModel, line);
         completer->setCompletionColumn(1);
         completer->setFilterMode(Qt::MatchContains);
-        completer->setCaseSensitivity(Qt::CaseInsensitive);
+        completer->setCaseSensitivity(Qt::CaseSensitive);
         QObject::connect(line, &QLineEdit::editingFinished,
                 [=] ()
                 {
@@ -1553,6 +1592,7 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
         break;
     }
     case Blank: {
+        line->setObjectName("blank");
         line->setDisabled(true);
         setCellWidget(row, column, line);
         break;
