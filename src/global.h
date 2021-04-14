@@ -1,43 +1,36 @@
-/*
-    SIM - the Simple Inventory Manager
-    Copyright (C) 2021 Arealis
-
-    This file is part of Simple Inventory Manager.
-
-    Simple Inventory Manager is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    Simple Inventory Manager is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with Simple Inventory Manager.  If not, see <https://www.gnu.org/licenses/>.
-*/
-
 #ifndef GLOBAL_H
 #define GLOBAL_H
 
-#include <QStringBuilder>
-#include <QRegularExpression>
+#include <QString>
+#include <map>
 
 
-QString escapeSql(QString string) //This will escape the (') string delimiter in SQLite to protect from SQL Injections.
-{
-    if (string.isEmpty())
-        return "null";
+//enum TableFlag : int {PR, QR, PO, RR, MR};
 
-    QRegularExpression re(QRegularExpression::anchoredPattern("\\d*"));
-    QRegularExpression re2(QRegularExpression::anchoredPattern("\\d+\\.\\d*"));
-    if (re.match(string).hasMatch() || re2.match(string).hasMatch())
-        return string;
+enum Privelage : int {Viewer, Mechanic, Purchasing, InventoryManager, Admin};
+enum TableFlag : unsigned char {
+    InventoryHistory,
+    Items, ItemDetails,
+    Projects, ProjectDetails,
+    Suppliers, SupplierDetails,
+    PR, PRD, QR, QRD, PO, POD, RR, RRD, MR, MRD,
+};
 
-    for (int i = string.indexOf("'"); i != -1; i = string.indexOf("'", i+2))
-        string.insert(i, "'");
-    return "'"%string%"'";
-}
+struct User {
+    QString id; //Is a QString instead of an int for convenience when inserting into sql statements
+    QString login;
+    QString name;
+    QString email;
+    Privelage privelage;
+    void clear();
+};
+
+namespace CSS {
+    static const QString Normal = "color: #000000; background-color: #ffffff;"; //grey
+    static const QString Alert = "color: #aa4471; background-color: #ffe4e4;"; //red
+};
+
+QString returnStringINN(QString string, QString ifNotNull, QString ifNull = "");
+QString escapeSql(QString string); //This will escape the (') string delimiter in SQLite to protect from SQL Injections.
 
 #endif // GLOBAL_H

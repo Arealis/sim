@@ -20,148 +20,141 @@
 
 #include "userlogin.h"
 #include "ui_userlogin.h"
+#include "global.h"
 
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QStringBuilder>
+#include <QCompleter>
 
-bool ok = 0;
-
-UserLogin::UserLogin(QWidget *parent) :
+UserLogin::UserLogin(QString databaseName, User *currentUser, LoginFlag flag, QWidget *parent) :
     QDialog(parent),
     ui(new Ui::UserLogin)
 {
+    db = QSqlDatabase::database(databaseName, false);
+    qry = QSqlQuery(db);
+    loginFlag = flag;
+    user = currentUser;
     ui->setupUi(this);
+    ok = false;
+
     switch (loginFlag) {
-    case 0: { //login
+    case Login: {
+        setWindowTitle("Login");
         ui->emailWidget->hide();
         ui->topWidget->hide();
         break;
     }
-    case 1: { //new
+    case New: {
+        setWindowTitle("Create New User");
         break;
     }
-    case 2: { //edit
-        ui->privelageWidget->hide();
-        QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-        QSqlQuery q(simdb);
-        simdb.open();
-        q.exec(QString("SELECT name, email, user FROM userdata WHERE id = %1;").arg(currentUser));
-        q.next();
-        simdb.close();
-        ui->nameLineEdit->setText(q.value(0).toString());
+    case Edit: {
+        setWindowTitle("Edit Userdata");
+        ui->privelageComboBox->setDisabled(true);
         ui->nameLineEdit->setDisabled(true);
-        ui->emailLineEdit->setText(q.value(1).toString());
-        ui->usrLineEdit->setText(q.value(2).toString());
-        ok = 1;
+
+        ui->nameLineEdit->setText(user->name);
+        ui->emailLineEdit->setText(user->email);
+        ui->userLineEdit->setText(user->login);
+        ui->privelageComboBox->setCurrentIndex(user->privelage);
+        ok = true;
         break;
     }
     }
+
+    exec();
 }
 
 UserLogin::~UserLogin()
 {
-
     delete ui;
 }
 
 void UserLogin::on_acceptButton_clicked()
 {
-    QString email;
-    if (ui->emailLineEdit->text().isEmpty())
-        email = "null";
-    else
-        email = "'"+ui->emailLineEdit->text()+"'";
-
     switch(loginFlag) {
-    case 2: { //edit
-        if (ok)
-        {
-            if (ui->passLineEdit->text().isEmpty())
-            {
-                QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-                QSqlQuery q(simdb);
-                simdb.open();
-                q.exec(QString("UPDATE userdata SET name = '%1', user = '%2', email = %3 WHERE id = %4;")
-                       .arg(ui->nameLineEdit->text(), ui->usrLineEdit->text(), email ,currentUser));
-                simdb.close();
-                UserLogin::close();
-            } else {
-                QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-                QSqlQuery q(simdb);
-                simdb.open();
-                q.exec(QString("UPDATE userdata SET name = '%1', user = '%2', email = %3, pass = '%5' WHERE id = %4;")
-                       .arg(ui->nameLineEdit->text(), ui->usrLineEdit->text(), email ,currentUser, ui->passLineEdit->text()));
-                simdb.close();
-                UserLogin::close();
-            }
-        }
-        break;
-    }
-    case 1: { //new
-        if (!(ui->usrLineEdit->text().isEmpty()) && !(ui->passLineEdit->text().isEmpty()) && ok == true)
-        {
-
-            QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-            QSqlQuery q(simdb);
-            simdb.open();
-            q.exec(QString("INSERT INTO userdata (name, user, email, pass, privelage)"
-            "VALUES ('%1', '%2', %3, '%4', %5);")
-                   .arg(ui->nameLineEdit->text()
-                        ,ui->usrLineEdit->text()
-                        ,email
-                        ,ui->passLineEdit->text()
-                        ,QString::number(ui->privelageComboBox->currentIndex())));
-            q.exec(QString("SELECT id FROM userdata WHERE user = '%1';").arg(ui->usrLineEdit->text()));
-            q.next();
-            simdb.close();
-            currentUser = q.value(0).toString();
+    case Edit: {
+        if (ok) {
+            qryString = "UPDATE userdata SET "
+                     " name = "%escapeSql(ui->nameLineEdit->text())
+                    %" ,user = "%escapeSql(ui->nameLineEdit->text())
+                    %" ,email = "%escapeSql(ui->emailLineEdit->text())
+                    %returnStringINN(ui->passLineEdit->text(), ", pass = "%escapeSql(ui->passLineEdit->text()))
+                    %" WHERE id = "%user->id%";";
+            db.open();
+            qry.exec(qryString);
+            db.close();
             UserLogin::close();
         }
         break;
     }
-    case 0: { //login
-        QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-        QSqlQuery q(simdb);
-        QString user = ui->usrLineEdit->text();
-        QString pass = ui->passLineEdit->text();
-        simdb.open();
-        q.exec("SELECT user, pass, id FROM userdata WHERE user = '"+user+"';");
-        q.next();
-        simdb.close();
-        if (q.value(0).toString() == user && q.value(1).toString() == pass)
-        {
-            currentUser = q.value(2).toString();
+    case New: {
+        if (!(ui->userLineEdit->text().isEmpty()) && !(ui->passLineEdit->text().isEmpty()) && ok == true) {
+            qryString = QString("INSERT INTO userdata (name, user, email, pass, privelage) "
+                    "VALUES (%1, %2, %3, %4, %5);")
+                    .arg(escapeSql(ui->nameLineEdit->text())
+                         ,escapeSql(ui->userLineEdit->text())
+                         ,escapeSql(ui->emailLineEdit->text())
+                         ,escapeSql(ui->passLineEdit->text())
+                         ,QString::number(ui->privelageComboBox->currentIndex()));
+            db.open();
+            qry.exec(qryString);
+            qry.exec("SELECT id, user, name, email, privelage FROM userdata WHERE user = "%escapeSql(ui->userLineEdit->text())%";");
+            qry.next();
+            db.close();
+
+            user->id = qry.value(0).toString();
+            user->login = qry.value(1).toString();
+            user->name = qry.value(2).toString();
+            user->email = qry.value(3).toString();
+            user->privelage = static_cast<Privelage>(qry.value(4).toInt());
             UserLogin::close();
         }
         break;
     }
-    }
-}
-
-void UserLogin::on_usrLineEdit_editingFinished()
-{
-    if (loginFlag > 0) //new or edit
-    {
-        QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-        QString user = ui->usrLineEdit->text();
-        QSqlQuery q(simdb);
-        simdb.open();
-        q.exec(QString("SELECT user FROM userdata WHERE user = '%1' EXCEPT SELECT user FROM userdata WHERE id = %2;").arg(user,currentUser));
-        q.next();
-        simdb.close();
-        if (q.value(0).toString() == user) {
-            ui->usrLineEdit->setStyleSheet("QLineEdit#usrLineEdit {color:#AA4471; background-color:#ffe4e4}");
-            ok = false;
-        } else {
-            ui->usrLineEdit->setStyleSheet("QLineEdit#UsedForText {color:#000000; background-color:#ffffff}");
-            ok = true;
+    case Login: {
+        QString login = ui->userLineEdit->text();
+        QString password = ui->passLineEdit->text();
+        db.open();
+        qry.exec("SELECT id, user, name, email, pass, privelage FROM userdata WHERE user = "%escapeSql(login)%";");
+        qry.next();
+        db.close();
+        if (qry.value(1).toString() == login && qry.value(4).toString() == password) {
+            user->id = qry.value(0).toString();
+            user->login = qry.value(1).toString();
+            user->name = qry.value(2).toString();
+            user->email = qry.value(3).toString();
+            user->privelage = static_cast<Privelage>(qry.value(5).toInt());
+            UserLogin::close();
         }
+        break;
+    }
     }
 }
 
 void UserLogin::on_cancelButton_clicked()
 {
-    if (loginFlag == 0) //if this is a Login
-        currentUser = "0";
+    if (loginFlag == Login)
+        user->clear();
     UserLogin::close();
+}
+
+void UserLogin::on_userLineEdit_editingFinished()
+{
+    if (loginFlag != Login) {
+        QString login = escapeSql(ui->userLineEdit->text());
+        db.open();
+        qry.exec("SELECT user FROM userdata WHERE user = "%login%" EXCEPT SELECT user FROM userdata WHERE id = "%user->id%";");
+        qry.next();
+        db.close();
+        if (qry.value(0).toString() == login) {
+            ui->userLineEdit->setStyleSheet(CSS::Alert);
+            //TODO: Include "This name is already taken" or something.
+            ok = false;
+        } else {
+            ui->userLineEdit->setStyleSheet(CSS::Normal);
+            ok = true;
+        }
+    }
 }

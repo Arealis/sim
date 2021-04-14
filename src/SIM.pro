@@ -22,6 +22,7 @@ CONFIG(debug, debug|release) {
 SOURCES += \
     createdocument.cpp \
     editcompanyinfo.cpp \
+    global.cpp \
     main.cpp \
     mainwindow.cpp \
     userlogin.cpp

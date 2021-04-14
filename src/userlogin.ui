@@ -152,7 +152,7 @@
      </property>
      <layout class="QHBoxLayout" name="horizontalLayout_3">
       <item>
-       <widget class="QWidget" name="usrWidget" native="true">
+       <widget class="QWidget" name="userWidget" native="true">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
           <horstretch>0</horstretch>
@@ -173,7 +173,7 @@
           <number>0</number>
          </property>
          <item>
-          <widget class="QLabel" name="usrLabel">
+          <widget class="QLabel" name="userLabel">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
              <horstretch>0</horstretch>
@@ -192,7 +192,7 @@
           </widget>
          </item>
          <item>
-          <widget class="QLineEdit" name="usrLineEdit">
+          <widget class="QLineEdit" name="userLineEdit">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
              <horstretch>0</horstretch>

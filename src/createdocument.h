@@ -13,7 +13,11 @@
 #include <QLabel>
 #include <QCheckBox>
 #include <QGridLayout>
+#include <QPlainTextEdit>
 
+#include "global.h"
+
+//delete this later. It is redundant and stupid.
 class CreateDocument;
 
 namespace Ui {
@@ -24,8 +28,7 @@ class ResizableTable : public QTableWidget {
     Q_OBJECT
 
 public:
-    explicit ResizableTable(CreateDocument* parent = nullptr);
-
+    explicit ResizableTable(TableFlag tableFlag, CreateDocument* parent = nullptr);
     struct columnId {
         //! This is all the data from the column headers so that they can be referenced in the program
         //! without having to do expensive look ups by passing in string arguments into a QTableWidget function
@@ -46,27 +49,27 @@ public:
         char project;
     };
 
-    QMenu *menu;
-    QAction *deleteRow;
-    columnId cid;
-
+    QSqlDatabase db;
     CreateDocument *parentDoc;
-
-    int finalRow;
-    int cfRow, customButtonRow;
-    int priceCol, qtyCol;
-
-    double taxableSubtotal, taxExemptSubtotal;
+    columnId cid;
+    TableFlag tflag;
 
     QStringList colNames;
+    QString docname;
 
-    QSqlQueryModel *itemModel, *projectModel, *supplierModel;
+    int finalRow;
+    double taxableSubtotal, taxExemptSubtotal;
 
-    void updateTotal(int row);
 
-    void storeTableDetails(QSqlQuery qry, QString docnum, int tableFlag);
+    QMenu *menu;
+    QAction *deleteRow;
 
-    void fetchRows(QSqlQuery qry, int tFlag, QString docnum);
+
+    void updateRowTotal(int row);
+
+    void storeRows(QSqlQuery qry, QString docnum);
+
+    void fetchRows(QSqlQuery qry, QString docnum);
 
     void appendRow();
 
@@ -86,29 +89,43 @@ public:
     void customLineEdit(int row, lineType type, int column = 0);
     void customCheckBox(int row, int column);
 
-    void initializeColumns(int tflag);
+    void initializeColumns();
 
     void onCustomContextMenuRequested(const QPoint &pos);
 };
 
 class CreateDocument : public QDialog
 {
+private:
     Q_OBJECT
 
 public:
-    explicit CreateDocument(QWidget *parent = nullptr);
+    explicit CreateDocument(TableFlag tableFlag, QString docnum, User *user, QString databaseName, QWidget *parent = nullptr);
     ~CreateDocument();
 
-    int cfRow, customButtonRow, customExpenseRowStart, customExpenseRowCount, taxableAmountRow;
+    User *user;
+    TableFlag tFlag;
+    QSqlDatabase db;
+    QString docname, docnum;
+    int customDetailRow, customDetailCount, addDetailButtonRow, recurringCustomDetailCount, customExpenseRowStart, customExpenseRowCount, taxableAmountRow;
     bool taxExempt, discBeforeTax;
 
     ResizableTable *table;
 
-    void initializeTotals(int tnum = 0);
+    //All of these are the totals
+    QCheckBox *discountBeforeTax;
+    QLabel *taxableSubtotal, *taxExemptSubtotal, *taxableAmount, *taxExemptAmount, *total, *addExpenseLabel;
+    QLineEdit *discountAfterTax, *tax, *discountOnTaxExempt, *discountOnTaxable;
+    QFrame *line1, *line2;
+    QPushButton *addExpenseButton;
+
+    void initTotals();
 
     void updateTotal(double total, bool isTaxExempt);
 
 private slots:
+
+    void fetchTotals(QSqlQuery qry);
 
     void fetchRateAndAmount(QSqlQuery qry, int rateIndex, QLineEdit *line, QGridLayout *grid, bool custom = 0);
 
@@ -126,27 +143,40 @@ private slots:
 
     void on_cancel_clicked();
 
-    void on_saveDraft_clicked();
+    void on_saveDraft_clicked(QSqlDatabase db);
 
-    void storeCustomExpenses(QSqlQuery qry);
+    void storeCustomExpenses(QSqlQuery qry, QString docnum);
 
-    void storeTable(int tableFlag, QString oldDocNum, QString newDocNum);
+    void storeTable(QSqlQuery qry, QString oldDocNum, QString newDocNum, int status = 0);
 
-    void insertRecurringCustomDetails(QSqlQuery qry, QString tableFlag, int *row);
+    void storeCustomDetails(QSqlQuery qry, QString docnum);
 
-    void fetchCustomDetails(QSqlQuery qry, int *row, QString tableFlag, QString docNum, bool editable);
+    void insertRecurringCustomDetails(QSqlQuery qry, int *row);
+
+    void fetchCustomDetails(QSqlQuery qry, int *row, bool editable);
 
     void deleteCustomDetail();
 
     void deleteCustomExpense();
 
-    void fetchDetails(QSqlQuery qry, int tFlag, QString docnum);
+    void fetchDetails(QSqlQuery qry);
 
-    void DeleteDocument();
+    void DeleteDocument(QSqlQuery qry, QString docnum);
 
 private:
     Ui::CreateDocument *ui;
 };
+
+enum ModelFlag {Item, Supplier, Project, Custom};
+QSqlQueryModel *initModel(ModelFlag modelFlag, QSqlDatabase db, QWidget *parent, QString query = NULL);
+
+QDateTimeEdit *initDateTimeEdit(QWidget *parent);
+QLineEdit *initCompletedLineEdit(QSqlQueryModel *model, QWidget *parent = nullptr, int column = NULL);
+QWidget *initInfoWidget(QWidget *parent, QString title);
+QWidget *initInfoWidget(QWidget *parent, QString title, QSqlQueryModel *model);
+
+void infoWidgetConnector(QLineEdit *line, bool success);
+inline void onCompletion(QLineEdit *line, void (*function)(QLineEdit*, bool) = nullptr);
 
 bool validateProject(QSqlQuery qry, QString project);
 QString validateSupplier(QSqlQuery qry, QString supplier, bool *newEntry);
@@ -155,18 +185,10 @@ QString validateItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString u
 inline QString insertNewSupplier(QSqlQuery qry, QString supplier);
 inline QString insertNewItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit, QString category);
 
-void connectCompleterToLine(QLineEdit *line);
+void emitSignalOnCompletion(QLineEdit *line);
 
 QString returnStringINN(QVariant sqlValue, QString ifNotNull, QString ifNull);
 
-extern QString tflag, currentUser, docnum;
-
-inline QString stringAt(QCompleter *completer, int column)
-{
-    return completer->currentIndex().siblingAtColumn(column).data().toString();
-}
-
-inline QString cssclear1 = "color: #000000; background-color: #ffffff;"; //red
-inline QString cssalert1 = "color: #aa4471; background-color: #c7c7c7;"; //grey
+QString stringAt(QCompleter *completer, int column);
 
 #endif // CREATEDOCUMENT_H

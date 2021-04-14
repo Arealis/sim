@@ -52,118 +52,103 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="QPushButton" name="logoButton">
-     <property name="minimumSize">
-      <size>
-       <width>0</width>
-       <height>0</height>
-      </size>
-     </property>
-     <property name="text">
-      <string>Logo</string>
-     </property>
-     <property name="iconSize">
-      <size>
-       <width>500</width>
-       <height>100</height>
-      </size>
-     </property>
-    </widget>
-   </item>
-   <item>
     <widget class="QWidget" name="extraW" native="true">
      <layout class="QGridLayout" name="gridLayout">
-      <item row="6" column="1">
-       <widget class="QLabel" name="billingLabel">
-        <property name="text">
-         <string>Billing Address</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="QLabel" name="phone2Label">
-        <property name="text">
-         <string>Phone2</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QLineEdit" name="fax">
-        <property name="text">
-         <string/>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="1">
-       <widget class="QLineEdit" name="phone2"/>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="faxLabel">
-        <property name="text">
-         <string>Fax</string>
-        </property>
-       </widget>
-      </item>
-      <item row="5" column="1">
-       <widget class="QLineEdit" name="website"/>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLineEdit" name="company">
-        <property name="text">
-         <string/>
-        </property>
-       </widget>
-      </item>
-      <item row="5" column="0">
-       <widget class="QLineEdit" name="email"/>
-      </item>
-      <item row="0" column="1">
-       <widget class="QLabel" name="phoneLabel">
-        <property name="text">
-         <string>Phone</string>
-        </property>
-       </widget>
+      <item row="8" column="1">
+       <widget class="QPlainTextEdit" name="billing"/>
       </item>
       <item row="4" column="0">
-       <widget class="QLabel" name="emailLabel">
+       <widget class="QLabel" name="logoLabel">
         <property name="text">
-         <string>Email</string>
+         <string>Logo</string>
         </property>
        </widget>
       </item>
-      <item row="6" column="0">
-       <widget class="QLabel" name="shippingLabel">
-        <property name="text">
-         <string>Shipping Address</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="companyLabel">
-        <property name="text">
-         <string>Company Name</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QLineEdit" name="phone"/>
-      </item>
-      <item row="4" column="1">
-       <widget class="QLabel" name="websiteLabel">
-        <property name="text">
-         <string>Website</string>
-        </property>
-       </widget>
-      </item>
-      <item row="7" column="0">
+      <item row="8" column="0">
        <widget class="QPlainTextEdit" name="shipping">
         <property name="plainText">
          <string/>
         </property>
        </widget>
       </item>
+      <item row="4" column="1">
+       <widget class="QLabel" name="infoLabel">
+        <property name="text">
+         <string>Company Info</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QPushButton" name="logoButton">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>200</width>
+          <height>100</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0" colspan="2">
+       <widget class="QLabel" name="nameLabel">
+        <property name="text">
+         <string>Company Name</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QLineEdit" name="name">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
       <item row="7" column="1">
-       <widget class="QPlainTextEdit" name="billing"/>
+       <widget class="QLabel" name="billingLabel">
+        <property name="text">
+         <string>Billing Address</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="0">
+       <widget class="QLabel" name="shippingLabel">
+        <property name="text">
+         <string>Shipping Address</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QPlainTextEdit" name="info"/>
+      </item>
+      <item row="6" column="1">
+       <widget class="QLabel" name="infoNote">
+        <property name="text">
+         <string>*The company info is the text that appears next to the logo when you create a document..</string>
+        </property>
+        <property name="scaledContents">
+         <bool>false</bool>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
       </item>
      </layout>
     </widget>
@@ -191,17 +176,10 @@
   </layout>
  </widget>
  <tabstops>
-  <tabstop>company</tabstop>
-  <tabstop>phone</tabstop>
-  <tabstop>fax</tabstop>
-  <tabstop>phone2</tabstop>
-  <tabstop>email</tabstop>
-  <tabstop>website</tabstop>
   <tabstop>shipping</tabstop>
   <tabstop>billing</tabstop>
   <tabstop>saveButton</tabstop>
   <tabstop>cancelButton</tabstop>
-  <tabstop>logoButton</tabstop>
  </tabstops>
  <resources/>
  <connections/>

@@ -31,165 +31,258 @@
 #include <QStandardItemModel>
 #include <QStringBuilder>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QDateTimeEdit>
 
 #include <QDebug>
 #include <QSqlError>
 
-QString docname;
+/*! The following is a breif overview of what should happen in this file
+ *
+ *  1. Initialize an empty version of the document first, then initialize
+ *      an empty version of the table.
+ *  2. If this is an existing document: First, populate the table. Then,
+ *      populate the document.[1]
+ *
+ *  The program is now in the users hands. Change will only happen if one
+ *  of the following occurs:
+ *  - Save button is clicked (final or draft)
+ *      Verify using SQL that all items are valid, all important fields
+ *      have been filled out, and that there will be no overwriting of
+ *      important data. Then store the document with the appropriate
+ *      status (0 for draft, 1 for complete [as in open])
+ *  - Delete button is clicked
+ *      Delete everything in SIM that has a reference to this docnum
+ *  - Cancel button is clicked
+ *      Do nothing and close the windows
+ *
+ *  [1] We populate the table first and then the document because of
+ *  problems that can occur if the table tries to update the text of
+ *  a Subtotal Label that does not exist.
+ */
 
-QString returnStringINN(QVariant sqlValue, QString ifNotNull = "%1\n", QString ifNull = "")
-{
-    if (sqlValue.isNull())
-        return ifNull;
-    else
-        return ifNotNull.arg(sqlValue.toString());
-}
-
-CreateDocument::CreateDocument(QWidget *parent) :
+CreateDocument::CreateDocument(TableFlag tableFlag, QString docnum, User *user, QString connectionName, QWidget *parent) :
     QDialog(parent),
     ui(new Ui::CreateDocument)
 {
     ui->setupUi(this);
-    QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-    QSqlQuery qry(simdb);
+    this->setWindowFlags(Qt::Window);
+    db = QSqlDatabase::database(connectionName, false);
+    tFlag = tableFlag;
+    QSqlQuery qry(db);
 
-    cfRow = 1; // The row in the gridLayout where the first non-rcf (recurring custom field) custom row lives
-    customButtonRow = 1; // The row in the gridLayout where the addCustom button lives
-    //! FIRST: Set up the elements that are shared between all documents
-    //!     (ie. The header: company name, logo, address)
+    customDetailCount = 0;
+    customDetailRow = 1; // The row in the gridLayout where the first non-rcf (recurring custom field) custom row lives
+    addDetailButtonRow = 1; // The row in the gridLayout where the addCustom button lives
 
-    //Change the logo to be user editable, auto-resizing (with fixed aspect ratio),
+    //      FIRST: Initialize a blank version of the document, which will be populated if necessary.
+    // HEADER
+    //  Logo
     ui->logo->setPixmap(qApp->applicationDirPath()+"/logo/logo.png");
     ui->logo->setPixmap(ui->logo->pixmap().scaledToHeight(75));
-
-    simdb.open();
-    qry.exec("SELECT company.name, company.phone, company.fax, company.email, company.website, shipping.address, billing.address "
-        "FROM company "
-        "INNER JOIN addresses AS 'shipping' ON shipping.id = company.shipping_address_id "
-        "INNER JOIN addresses AS 'billing' ON billing.id = company.billing_address_id "
-    ";");
+    // Company Info
+    db.open();
+    qry.exec("SELECT name, info FROM company;");
     qry.next();
-    simdb.close();
+    db.close();
     ui->companyName->setText(qry.value(0).toString());
-    ui->companyAddress->setText(QString("%1%2%3%4%5").arg(qry.value(6).toString()
-                                                          ,returnStringINN(qry.value(1),"\nPhone: %1")
-                                                          ,returnStringINN(qry.value(2)," | Fax: %1")
-                                                          ,returnStringINN(qry.value(3),"\n%1")
-                                                          ,returnStringINN(qry.value(4),"\n%1")));
+    ui->companyInfo->setText(qry.value(1).toString());
 
-    //      SECOND: Initialize the table
-    table = new ResizableTable(this);
-    ui->verticalLayout_3->addWidget(table);
-
-    //      THIRD: Set up elements and/or hide elements that are document specific
-    switch (tflag.toInt()) {
-    case 0: { //If PR
-        ui->doctype->setText("Purchase Requisition #");
+    // DOCUMENT SPECIFIC INFO
+    switch(tFlag) {
+    case PR: {
+        setWindowTitle("Create Purchase Requisition");
+        ui->doctype->setText("Purchase Requisition");
         docname = "pr";
 
-        ui->shipToLabel->hide();
-        ui->shippingAddress->hide();
-        ui->supplierLabel->hide();
-        ui->supplierAddress->hide();
+        table = new ResizableTable(tFlag, this);
+        ui->verticalLayout_3->addWidget(table);
 
-        ui->prLabel->hide();
-        ui->prnum->hide();
-        ui->qrLabel->hide();
-        ui->qrnum->hide();
-        ui->poLabel->hide();
-        ui->ponum->hide();
-        ui->invoiceLabel->hide();
-        ui->invoicenum->hide();
+        //Thought about subclassing these instead of having init functions. Similar complexity, similar performance. Not worth changing right now.
+        QLabel *projectLabel = new QLabel("Project", ui->internalWidget);
+        QSqlQueryModel *projectModel = initModel(ModelFlag::Project, db, ui->internalWidget);
+        QLineEdit *project = initCompletedLineEdit(projectModel, ui->internalWidget);
+        project->setObjectName("project");
+        onCompletion(project);
+        QLabel *neededByLabel = new QLabel("Needed by", ui->internalWidget);
+        QDateTimeEdit *neededBy = initDateTimeEdit(ui->internalWidget);
 
-        initializeTotals(docnum.toInt());
+        ui->internalDetailsGrid->addWidget(projectLabel, 0, 0);
+        ui->internalDetailsGrid->addWidget(project, 0, 1);
+        ui->internalDetailsGrid->addWidget(neededByLabel, 1, 0);
+        ui->internalDetailsGrid->addWidget(neededBy, 1, 1);
 
-        QCompleter *completer = new QCompleter(table->projectModel, ui->project);
-        completer->setFilterMode(Qt::MatchContains);
-        completer->setCaseSensitivity(Qt::CaseInsensitive);
-        ui->project->setCompleter(completer);
-        connectCompleterToLine(ui->project);
-        QObject::connect(ui->project, &QLineEdit::editingFinished,
-                [=] ()
-                {
-                    completer->setCompletionPrefix(ui->project->text());
-                    if(completer->currentCompletion() == ui->project->text())
-                        ui->project->setStyleSheet(cssclear1);
-                    else
-                        ui->project->setStyleSheet(cssalert1);
-                });
+        initTotals();
         break;
     }
-    case 1: { //If QR
-        ui->doctype->setText("Quotation Request #");
+    case QR: {
+        setWindowTitle("Create Request for Quotation");
+        ui->doctype->setText("Request for Quotation");
         docname = "qr";
 
-        ui->qrLabel->hide();
-        ui->qrnum->hide();
-        ui->poLabel->hide();
-        ui->ponum->hide();
-        ui->invoiceLabel->hide();
-        ui->invoicenum->hide();
+        table = new ResizableTable(tFlag, this);
+        ui->verticalLayout_3->addWidget(table);
+
+        //Info boxes
+        QSqlQueryModel *supplierModel = initModel(Supplier, db, ui->info);
+        QWidget *supplierWidget = initInfoWidget(ui->info, "SUPPLIER", supplierModel);
+        onCompletion(supplierWidget->findChild<QLineEdit*>("line"), &infoWidgetConnector);
+
+        QWidget *shippingWidget = initInfoWidget(ui->info, "SHIPPING ADDRESS");
+        QWidget *billingWidget = initInfoWidget(ui->info, "BILLING ADDRESS");
+
+        ui->infoLayout->addWidget(billingWidget);
+        ui->infoLayout->addWidget(shippingWidget);
+        ui->infoLayout->addWidget(supplierWidget);
+
+        //Internal Details
+        QLabel *neededByLabel = new QLabel("Needed by", ui->internalWidget);
+        QDateTimeEdit *neededBy = initDateTimeEdit(ui->internalWidget);
+        ui->internalDetailsGrid->addWidget(neededByLabel, 0, 0);
+        ui->internalDetailsGrid->addWidget(neededBy, 0, 1);
+
+        QSqlQueryModel *prModel = initModel(Custom, db, ui->info, "SELECT num FROM pr WHERE status = 1;");
+        QLabel *prComboBoxLabel = new QLabel("PR#", ui->internalWidget);
+        QComboBox *prComboBox = new QComboBox(ui->info);
+        prComboBox->setModel(prModel);
+        //TODO: Add function to connect models (so that the whole table is updated when they are activated.
+        ui->internalDetailsGrid->addWidget(prComboBoxLabel, 1, 0);
+        ui->internalDetailsGrid->addWidget(prComboBox, 1, 1);
+
+        initTotals();
+        break;
+    }
+    case PO: {
+        setWindowTitle("Create Purchase Order");
+        ui->doctype->setText("Purchase Order");
+        docname = "po";
+
+        table = new ResizableTable(tFlag, this);
+        ui->verticalLayout_3->addWidget(table);
+
+        //Info Boxes
+        QSqlQueryModel *supplierModel = initModel(Supplier, db, ui->info);
+
+        QWidget *supplierWidget = initInfoWidget(ui->info, "SUPPLIER", supplierModel);
+        onCompletion(supplierWidget->findChild<QLineEdit*>("line"), &infoWidgetConnector);
+        QWidget *shippingWidget = initInfoWidget(ui->info, "SHIPPING ADDRESS");
+        QWidget *billingWidget = initInfoWidget(ui->info, "BILLING ADDRESS");
+
+        ui->infoLayout->addWidget(billingWidget);
+        ui->infoLayout->addWidget(shippingWidget);
+        ui->infoLayout->addWidget(supplierWidget);
+
+        //Internal Details
+        QLabel *neededByLabel = new QLabel("Needed by", ui->internalWidget);
+        QDateTimeEdit *neededBy = initDateTimeEdit(ui->internalWidget);
+        ui->internalDetailsGrid->addWidget(neededByLabel, 0, 0);
+        ui->internalDetailsGrid->addWidget(neededBy, 0, 1);
+
+        QSqlQueryModel *prModel = initModel(Custom, db, ui->info, "SELECT num FROM pr WHERE status = 1;");
+        QLabel *prComboBoxLabel = new QLabel("PR#", ui->internalWidget);
+        QComboBox *prComboBox = new QComboBox(ui->info);
+        prComboBox->setModel(prModel);
+        //TODO: Add function to connect models (so that the whole table is updated when they are activated.
+        ui->internalDetailsGrid->addWidget(prComboBoxLabel, 1, 0);
+        ui->internalDetailsGrid->addWidget(prComboBox, 1, 1);
+
+        QSqlQueryModel *qrModel = initModel(Custom, db, ui->info, "SELECT num FROM pr WHERE status = 1;");
+        QLabel *qrComboBoxLabel = new QLabel("PR#", ui->internalWidget);
+        QComboBox *qrComboBox = new QComboBox(ui->info);
+        qrComboBox->setModel(qrModel);
+        //TODO: Add function to connect models (so that the whole table is updated when they are activated.
+        ui->internalDetailsGrid->addWidget(qrComboBoxLabel, 2, 0);
+        ui->internalDetailsGrid->addWidget(qrComboBox, 2, 1);
+
+        initTotals();
+        break;
+    }
+    case RR: {
+        setWindowTitle("Create Receiving Report");
+        ui->doctype->setText("Receiving Report");
+        docname = "rr";
+
+        table = new ResizableTable(tFlag, this);
+        ui->verticalLayout_3->addWidget(table);
+
+        //Info Boxes
+        QSqlQueryModel *supplierModel = initModel(Supplier, db, ui->info);
+        QWidget *supplierWidget = initInfoWidget(ui->info, "SUPPLIER", supplierModel);
+        onCompletion(supplierWidget->findChild<QLineEdit*>("line"), &infoWidgetConnector);
+
+        ui->infoLayout->addWidget(supplierWidget);
+
+        //Internal Details
+        QSqlQueryModel *poModel = initModel(Custom, db, ui->info, "SELECT num FROM pr WHERE status = 1;");
+        QLabel *poComboBoxLabel = new QLabel("PR#", ui->internalWidget);
+        QComboBox *poComboBox = new QComboBox(ui->info);
+        poComboBox->setModel(poModel);
+        //TODO: Add function to connect models (so that the whole table is updated when they are activated.
+        ui->internalDetailsGrid->addWidget(poComboBoxLabel, 0, 0);
+        ui->internalDetailsGrid->addWidget(poComboBox, 0, 1);
+
+        //TODO: Add invoice number functionality (this can either be a QLineEdit or it can be a Combo Box that has an option to enter the invoice number into a QLineEdit)
 
         break;
     }
-    case 2: { //If PO
-        ui->doctype->setText("Purchase Order #");
-        docname = "po";
-        ui->shippingAddress->setText(qry.value(5).toString());
-        break;
-    }
-    case 3: { //If RR
-        ui->doctype->setText("Receiving Report #");
-        docname = "rr";
-        ui->shipToWidget->hide();
-        break;
-    }
-    case 4: { //If MR
-        ui->doctype->setText("Material Requisition #");
+    case MR: {
+        setWindowTitle("Create Material Requisition");
+        ui->doctype->setText("Material Requisition");
         docname = "mr";
+
+        table = new ResizableTable(tFlag, this);
+        ui->verticalLayout_3->addWidget(table);
+
+        //Internal Details
+        //  TODO: check what this is in the database
         break;
     }
     }
 
     //      LAST: Import elements from an existing document, or set defaults if new draft
+    //  This should become a POPULATE function
     if (docnum.isEmpty()) //If New Draft
     {
         ui->docNumber->setText("DRAFT");
         ui->update->hide();
         ui->deleteDraft->hide();
-        simdb.open();
-        qry.exec("SELECT date('now', 'localtime'), name, email FROM userdata WHERE id = "+currentUser+";");
+        db.open();
+        qry.exec("SELECT date('now', 'localtime'), name, email FROM userdata WHERE id = "%user->id%";");
         qry.next();
-        ui->detailsNames->setText(QString("Date:\nCreated by:%1").arg(returnStringINN(qry.value(2),"\nEmail:")));
+        ui->detailsNames->setText("Date:\nCreated by:"%returnStringINN(qry.value(2).toString(),"\nEmail:"));
         ui->detailsValues->setText(QString("%1%2%3")
-                                   .arg(qry.value(0).toString()+"\n"
-                                        ,qry.value(1).toString()
-                                        ,returnStringINN(qry.value(2),"\n%1")));
-        insertRecurringCustomDetails(qry, tflag, &customButtonRow);
-        simdb.close();
+                                   .arg(qry.value(0).toString()
+                                        ,"\n"%qry.value(1).toString()
+                                        ,returnStringINN(qry.value(2).toString(),"\n"%qry.value(2).toString())));
+        insertRecurringCustomDetails(qry, &addDetailButtonRow);
+        db.close();
     }
     else if (docnum.toInt() < 10000) //If old draft
     {
         ui->docNumber->setText(docnum);
-        ui->doctype->setText("DRAFT "+ui->doctype->text());
+        ui->doctype->setText("DRAFT "%ui->doctype->text());
         ui->update->hide();
-        simdb.open();
-        fetchDetails(qry, tflag.toInt(), docnum);
-        fetchCustomDetails(qry, &customButtonRow, tflag, docnum, true);
-        table->fetchRows(qry, tflag.toInt(), docnum);
-        simdb.close();
+        db.open();
+        fetchDetails(qry);
+        fetchCustomDetails(qry, &addDetailButtonRow, true);
+        table->fetchRows(qry,  docnum);
+        if (tFlag == PR || tFlag == QR || tFlag == PO)
+            fetchTotals(qry);
+        db.close();
     }
-    else //If finalized document
+    else //If finalized document ----- I'm starting to think that finalized documents should use something different.
     {
         ui->docNumber->setText(docnum);
         ui->saveDraft->hide();
         ui->save->hide();
         ui->deleteDraft->hide();
-        simdb.open();
-        fetchDetails(qry, tflag.toInt(), docnum);
-        fetchCustomDetails(qry, &customButtonRow, tflag, docnum, false);
-        table->fetchRows(qry, tflag.toInt(), docnum);
-        simdb.close();
+        db.open();
+        fetchDetails(qry);
+        fetchCustomDetails(qry, &addDetailButtonRow, false);
+        table->fetchRows(qry, docnum);
+        if (tFlag == PR || tFlag == QR || tFlag == PO)
+            fetchTotals(qry);
+        db.close();
         //I need to update the custom fields functions. There should be one to insert deletable custom fields, and one to insert constant custom fields.
     }
 
@@ -200,32 +293,201 @@ CreateDocument::CreateDocument(QWidget *parent) :
     confirm->addButton("Cancel", QMessageBox::RejectRole);
     confirm->setWindowTitle("Delete?");
     connect(ui->deleteDraft, &QPushButton::clicked, confirm, &QMessageBox::exec);
-    connect(confirm, &QMessageBox::accepted, this, &CreateDocument::DeleteDocument);
     connect(confirm, &QMessageBox::rejected, confirm, &QMessageBox::close);
+    connect(confirm, &QMessageBox::accepted, [this, qry, docnum] () {
+        db.open();
+        CreateDocument::DeleteDocument(qry, docnum);
+        db.close();
+        CreateDocument::close();
+    });
+
+
+
+    exec();
 }
 
-ResizableTable::ResizableTable(CreateDocument *parent) :
+QSqlQueryModel *initModel(ModelFlag modelFlag, QSqlDatabase db, QWidget *parent, QString query)
+{
+    QSqlQueryModel *model = new QSqlQueryModel(parent);
+    model->setObjectName(QString::number(modelFlag));
+
+    db.open();
+    switch (modelFlag) {
+    case Item: {
+        model->setQuery("SELECT id, num, desc, cat, unit FROM items;", db);
+        break;
+    }
+    case Supplier: {
+        model->setQuery("SELECT id, name FROM suppliers;", db);
+        break;
+    }
+    case Project: {
+        model->setQuery("SELECT name FROM projects;", db);
+        break;
+    }
+    case Custom: {
+        model->setQuery(query, db);
+        break;
+    }
+    }
+    while (model->canFetchMore()) { model->fetchMore(); }
+    db.close();
+
+    return model;
+}
+
+QLineEdit *initCompletedLineEdit(QSqlQueryModel *model, QWidget *parent, int column)
+{
+    QLineEdit *line = new QLineEdit(parent);
+
+    QCompleter *completer = new QCompleter(model, line);
+    completer->setFilterMode(Qt::MatchContains);
+    completer->setCaseSensitivity(Qt::CaseInsensitive);
+
+    switch(static_cast<ModelFlag>(model->objectName().toInt())) {
+    case Item: case Supplier: {
+        completer->setCompletionColumn(1);
+        break;
+    }
+    case Project: {
+        completer->setCompletionColumn(0);
+        break;
+    }
+    case Custom: {
+        completer->setCompletionColumn(column);
+        break;
+    }
+    }
+
+    line->setCompleter(completer);
+
+    return line;
+}
+
+QDateTimeEdit *initDateTimeEdit(QWidget *parent)
+{
+    QDateTimeEdit *date = new QDateTimeEdit(parent);
+    date->setDisplayFormat("yyyy/MM/dd");
+    date->setCalendarPopup(true);
+    date->setTimeSpec(Qt::UTC);
+    date->setObjectName("date");
+
+    return date;
+}
+
+inline void onCompletion(QLineEdit *line, void (*function)(QLineEdit*, bool))
+{
+    //  TODO: Make this comment make sense and name this function better
+    //  The reason the following exists (and is so janky) is because signal is because of signal and emitter problems with a QCompleter
+    //  and a QLineEdit. I cannot remember the exact details, but this takes care of it. It also has problems with case sensitivity.
+
+    // Just because the lineEdit is finished, that does not mean that there will be a completion. This lambda checks for that.
+    QCompleter *completer = line->completer();
+    QObject::connect(line, &QLineEdit::editingFinished, line, [line, completer, function] () {
+        bool hasCompletion = false;
+        for (int row = 0; completer->setCurrentRow(row); row++) {
+            if (completer->currentCompletion() == line->text()) {
+                hasCompletion = true;
+                line->setStyleSheet(CSS::Normal);
+                if (function != nullptr)
+                    function(line, hasCompletion);
+                break;
+            }
+        }
+        if (!hasCompletion)
+            line->setStyleSheet(CSS::Alert);
+    });
+
+    //If the completer is activated, there is a completion and it (hopefully) has been activated.
+    QObject::connect(completer, static_cast<void(QCompleter::*)(const QString &text)>(&QCompleter::activated), line, [line, function] () {
+        line->setStyleSheet(CSS::Normal);
+        if (function != nullptr)
+            function(line, true);
+    });
+}
+
+QWidget *initInfoWidget(QWidget *parent, QString title)
+{
+    //This is a basic info widget for displaying simple items like addresses
+    QWidget *widget = new QWidget(parent);
+    QVBoxLayout *layout = new QVBoxLayout(widget);
+    layout->setSpacing(1);
+
+    QLabel *name = new QLabel(title, widget);
+    QPlainTextEdit *info = new QPlainTextEdit(widget);
+    info->setObjectName("info");
+    layout->addWidget(name);
+    layout->addWidget(info);
+
+    widget->setContentsMargins(2,0,2,0);
+
+    return widget;
+}
+
+//The model this takes is very specific: id=0, name=1, info=2, internal=3
+QWidget *initInfoWidget(QWidget *parent, QString title, QSqlQueryModel *model)
+{
+    //This is an extended info widget
+    QWidget *widget = new QWidget(parent);
+    QVBoxLayout *layout = new QVBoxLayout(widget);
+    layout->setSpacing(1);
+
+    QLabel *name = new QLabel(title, widget);
+    QLineEdit *line = initCompletedLineEdit(model);
+    line->setObjectName("line");
+
+    QPlainTextEdit *info = new QPlainTextEdit(widget);
+    info->setPlaceholderText("Address");
+    info->setObjectName("info");
+    QObject::connect(info, &QPlainTextEdit::textChanged, info, [line, info] ()
+    {
+        if (line->completer()->currentIndex().siblingAtColumn(2).data().toString() != info->toPlainText())
+            info->setStyleSheet(CSS::Alert);
+        else
+            info->setStyleSheet(CSS::Normal);
+    });
+
+    QPlainTextEdit *internal = new QPlainTextEdit(widget);
+    internal->setPlaceholderText("Internal Information");
+    internal->setObjectName("internal");
+    QObject::connect(info, &QPlainTextEdit::textChanged, info, [line, info] ()
+    {
+        if (line->completer()->currentIndex().siblingAtColumn(3).data().toString() != info->toPlainText())
+            info->setStyleSheet(CSS::Alert);
+        else
+            info->setStyleSheet(CSS::Normal);
+    });
+
+    layout->addWidget(name);
+    layout->addWidget(line);
+    layout->addWidget(info);
+    layout->addWidget(internal);
+
+    widget->setContentsMargins(2,0,2,0);
+
+    return widget;
+    //TODO: Add a property of the widget that marks whether it has been modified or not.
+}
+
+void infoWidgetConnector(QLineEdit *line, bool success)
+{
+    if (success)
+    {
+        line->parent()->findChild<QPlainTextEdit*>("info")->setPlainText(line->completer()->currentIndex().siblingAtColumn(2).data().toString());
+        line->parent()->findChild<QPlainTextEdit*>("internal")->setPlainText(line->completer()->currentIndex().siblingAtColumn(3).data().toString());
+    } //TEST: See whether it is more intuitive to have a clear here or not.
+}
+
+ResizableTable::ResizableTable(TableFlag tableFlag, CreateDocument *parent) :
     QTableWidget(parent)
 {    
     // Initialize classes and variables
     parentDoc = parent;
-    QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-    itemModel = new QSqlQueryModel(this);
-    projectModel = new QSqlQueryModel(this);
-    supplierModel = new QSqlQueryModel(this);
-
-    simdb.open();
-    itemModel->setQuery("SELECT id, num, desc, cat, unit FROM items;", simdb);
-    while (itemModel->canFetchMore()) {itemModel->fetchMore();}
-    supplierModel->setQuery("SELECT id, name FROM suppliers;", simdb);
-    while (supplierModel->canFetchMore()) {supplierModel->fetchMore();}
-    projectModel->setQuery("SELECT name FROM projects;", simdb);
-    while (projectModel->canFetchMore()) {projectModel->fetchMore();}
-    simdb.close();
+    tflag = tableFlag;
 
     setRowCount(0);
 
-    initializeColumns(tflag.toInt());
+    initializeColumns();
 
     // Create base table
     setColumnCount(colNames.count());
@@ -233,14 +495,11 @@ ResizableTable::ResizableTable(CreateDocument *parent) :
     appendRow();
 
     // Connect signals and slots
-    connect(this, &ResizableTable::cellChanged,
+    connect(this, &ResizableTable::cellChanged, this,
             [=] (int row, int column)
     {
         if (row == finalRow && !item(row,column)->text().isEmpty())
             appendRow();
-
-        if ((column == cid.unitPrice || column == cid.qty) && row != finalRow)
-            updateTotal(row);
     });
 
     setContextMenuPolicy(Qt::CustomContextMenu);
@@ -248,10 +507,33 @@ ResizableTable::ResizableTable(CreateDocument *parent) :
     deleteRow = new QAction(this);
     deleteRow->setText("Delete Row");
     menu->addAction(deleteRow);
-    connect(this, &ResizableTable::customContextMenuRequested, [=] (const QPoint &pos) { ResizableTable::onCustomContextMenuRequested(pos); });
+    connect(this, &ResizableTable::customContextMenuRequested, this, [=] (const QPoint &pos) { ResizableTable::onCustomContextMenuRequested(pos); });
 }
 
-void ResizableTable::updateTotal(int row)
+QString stringAt(QCompleter *completer, int column)
+{
+    return completer->currentIndex().siblingAtColumn(column).data().toString();
+}
+
+// ========================================
+// ===== CREATING AND MANAGING TOTALS =====
+// ========================================
+
+void CreateDocument::updateTotal(double total, bool isTaxExempt)
+{
+    if (isTaxExempt)
+    {
+        QLabel *taxExemptSubtotal = qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(1,3)->widget());
+        taxExemptSubtotal->setText(QString::number(total,'f',2));
+        emit taxExemptSubtotal->linkActivated("");
+    } else {
+        QLabel *taxableSubtotal = qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(0,3)->widget());
+        taxableSubtotal->setText(QString::number(total,'f',2));
+        emit taxableSubtotal->linkActivated("");
+    }
+}
+
+void ResizableTable::updateRowTotal(int row)
 {
     //In my eyes it is preferrable to recalculate totals every time because floating point arithmetic is jank, but I can test again
     //Set the correct item total
@@ -275,68 +557,6 @@ void ResizableTable::updateTotal(int row)
     static_cast<CreateDocument*>(parentDoc)->updateTotal(taxExemptTotal, 1);
 }
 
-void CreateDocument::updateTotal(double total, bool isTaxExempt)
-{
-    if (isTaxExempt)
-    {
-        QLabel *taxExemptSubtotal = qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(1,3)->widget());
-        taxExemptSubtotal->setText(QString::number(total,'f',2));
-        emit taxExemptSubtotal->linkActivated("");
-    } else {
-        QLabel *taxableSubtotal = qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(0,3)->widget());
-        taxableSubtotal->setText(QString::number(total,'f',2));
-        emit taxableSubtotal->linkActivated("");
-    }
-}
-
-QLineEdit* CreateDocument::createTotalsLineEdit(QLabel *nextSubtotal, int *row, QString title, QWidget *parent, QGridLayout *grid, bool expense)
-{
-    //The subtotal is what the subtotal this is currently working towards
-    QCheckBox *box = new QCheckBox(parent);
-    QLineEdit *rate = new QLineEdit(parent);
-    QLabel *label = new QLabel(title, parent);
-    QLineEdit *amount = new QLineEdit(parent);
-
-    rate->setAlignment(Qt::AlignCenter);
-    rate->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Maximum);
-    rate->setPlaceholderText("%");
-    rate->setMaximumWidth(35);
-    rate->setEnabled(false);
-
-    label->setAlignment(Qt::AlignRight);
-
-    amount->setAlignment(Qt::AlignRight);
-    amount->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Maximum);
-    amount->setPlaceholderText("$");
-    amount->setMaximumWidth(100);
-
-    grid->addWidget(box, *row, 0);
-    grid->addWidget(rate, *row, 1);
-    grid->addWidget(label, *row, 2);
-    grid->addWidget(amount, *row, 3);
-
-    connect(box, &QCheckBox::stateChanged,
-            [rate, amount] (int state)
-    {
-        if (state)
-        {
-            rate->setEnabled(true);
-            amount->setEnabled(false);
-        } else {
-            rate->setEnabled(false);
-            amount->setEnabled(true);
-            rate->clear();
-        }
-    });
-
-    connect(rate, &QLineEdit::textEdited, [nextSubtotal] () { emit nextSubtotal->linkActivated(""); });
-    connect(amount, &QLineEdit::textEdited, [nextSubtotal] () { emit nextSubtotal->linkActivated(""); });
-    //signaling the subtotal to recalculates everything may not be necessary. Optimization opportunity.
-
-    *row = *row - 1;
-    return amount;
-}
-
 QLabel* CreateDocument::createTotalsLabel(QLabel *nextSubtotal, int *row, QString title, QWidget *parent, QGridLayout *grid)
 {
     QLabel *label = new QLabel(title, parent);
@@ -348,7 +568,7 @@ QLabel* CreateDocument::createTotalsLabel(QLabel *nextSubtotal, int *row, QStrin
     grid->addWidget(label, *row, 2);
     grid->addWidget(amount, *row, 3);
 
-    //Since most of these only get called once, it may be better to just inline them into the initializeTotals function.
+    //Since most of these only get called once, it may be better to just inline them into the initTotals function.
     connect(amount, &QLabel::linkActivated,
             [=] ()
     {
@@ -407,6 +627,54 @@ QLabel* CreateDocument::createTotalsLabel(QLabel *nextSubtotal, int *row, QStrin
     return amount;
 }
 
+QLineEdit* CreateDocument::createTotalsLineEdit(QLabel *nextSubtotal, int *row, QString title, QWidget *parent, QGridLayout *grid, bool expense)
+{
+    //The subtotal is what the subtotal this is currently working towards
+    QCheckBox *box = new QCheckBox(parent);
+    QLineEdit *rate = new QLineEdit(parent);
+    QLabel *label = new QLabel(title, parent);
+    QLineEdit *amount = new QLineEdit(parent);
+
+    rate->setAlignment(Qt::AlignCenter);
+    rate->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Maximum);
+    rate->setPlaceholderText("%");
+    rate->setMaximumWidth(35);
+    rate->setEnabled(false);
+
+    label->setAlignment(Qt::AlignRight);
+
+    amount->setAlignment(Qt::AlignRight);
+    amount->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Maximum);
+    amount->setPlaceholderText("$");
+    amount->setMaximumWidth(100);
+
+    grid->addWidget(box, *row, 0);
+    grid->addWidget(rate, *row, 1);
+    grid->addWidget(label, *row, 2);
+    grid->addWidget(amount, *row, 3);
+
+    connect(box, &QCheckBox::stateChanged,
+            [rate, amount] (int state)
+    {
+        if (state)
+        {
+            rate->setEnabled(true);
+            amount->setEnabled(false);
+        } else {
+            rate->setEnabled(false);
+            amount->setEnabled(true);
+            rate->clear();
+        }
+    });
+
+    connect(rate, &QLineEdit::textEdited, [nextSubtotal] () { emit nextSubtotal->linkActivated(""); });
+    connect(amount, &QLineEdit::textEdited, [nextSubtotal] () { emit nextSubtotal->linkActivated(""); });
+    //signaling the subtotal to recalculates everything may not be necessary. Optimization opportunity.
+
+    *row = *row - 1;
+    return amount;
+}
+
 QFrame* CreateDocument::createTotalsLine(int *row, QWidget *parent, QGridLayout *grid)
 {
     QFrame *line = new QFrame(parent);
@@ -419,6 +687,7 @@ QFrame* CreateDocument::createTotalsLine(int *row, QWidget *parent, QGridLayout 
     *row = *row - 1;
     return line;
 }
+
 
 void CreateDocument::setTotalsRowHidden(QGridLayout *grid, QLabel *widget, bool hidden)
 {
@@ -446,7 +715,24 @@ void CreateDocument::setTotalsRowHidden(QGridLayout *grid, QFrame *widget, bool 
 }
 
 
-void CreateDocument::initializeTotals(int tnum) //Need to fix how qrys are handled. It messes the open/close flow often.
+void CreateDocument::fetchRateAndAmount(QSqlQuery qry, int rateIndex, QLineEdit *line, QGridLayout *grid, bool custom)
+{
+    int row, trash;
+    grid->getItemPosition(grid->indexOf(line), &row, &trash, &trash, &trash);
+
+    if (qry.value(rateIndex).toDouble() == 0)
+    {
+        qobject_cast<QCheckBox*>(grid->itemAtPosition(row, 0)->widget())->setChecked(false);
+        line->setText(qry.value(rateIndex+1).toString());
+    } else {
+        qobject_cast<QCheckBox*>(grid->itemAtPosition(row, 0)->widget())->setChecked(true);
+        qobject_cast<QLineEdit*>(grid->itemAtPosition(row, 1)->widget())->setText(qry.value(rateIndex).toString());
+    }
+    if (custom)
+        qobject_cast<QLineEdit*>(grid->itemAtPosition(row, 2)->widget())->setText(qry.value(rateIndex-1).toString());
+}
+
+void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the program in general. It messes the database open()/close() flow often.
 {
     /* This is the most complex part of the CreateDocument window, and I'd like to simplify it in the future. This is how it works for now.
      *
@@ -503,6 +789,12 @@ void CreateDocument::initializeTotals(int tnum) //Need to fix how qrys are handl
      *      - Discounts (QLineEdit)
      *      - Subtotals (QLabel)
      */
+    connect (table, &ResizableTable::cellChanged, table,
+             [=] (int row, int column)
+    {
+        if ((column == table->cid.unitPrice || column == table->cid.qty) && row != table->finalRow)
+            table->updateRowTotal(row);
+    });
 
     customExpenseRowCount = 0;
     int nextOpenRow = 11;
@@ -510,21 +802,17 @@ void CreateDocument::initializeTotals(int tnum) //Need to fix how qrys are handl
     taxExempt = 0;
     discBeforeTax = 1;
 
-    QCheckBox *discountBeforeTax = new QCheckBox("Discount Before Tax", ui->internalWidget);
+    discountBeforeTax = new QCheckBox("Discount Before Tax", ui->internalWidget);
     discountBeforeTax->setChecked(true);
-    ui->internalDetailsGridLayout->addWidget(discountBeforeTax, ui->internalDetailsGridLayout->rowCount(), 0, 1, 2);
+    qDebug() << ui->internalDetailsGrid->rowCount();
+    ui->internalDetailsGrid->addWidget(discountBeforeTax, ui->internalDetailsGrid->rowCount(), 0, 1, 2);
 
     //Declare everything so we can work from the top down
-    QLabel *taxableSubtotal, *taxExemptSubtotal, *taxableAmount, *taxExemptAmount, *total, *addExpenseLabel;
-    QLineEdit *discountAfterTax, *tax, *discountOnTaxExempt, *discountOnTaxable;
-    QFrame *line1, *line2;
-    QPushButton *addExpenseButton;
-
     total = createTotalsLabel(nullptr, &nextOpenRow, "Grand Total", ui->totalsWidget, ui->totalsGridLayout);
     line2 = createTotalsLine(&nextOpenRow, ui->totalsWidget, ui->totalsGridLayout);
     customExpenseRowStart = nextOpenRow;                                    //See this...
     addExpenseLabel = new QLabel("Add Expense", ui->totalsWidget);          //this here
-    addExpenseButton = new QPushButton("+", ui->totalsWidget);              //could be outsourced
+    addExpenseButton = new QPushButton("%", ui->totalsWidget);              //could be outsourced
     ui->totalsGridLayout->addWidget(addExpenseLabel, nextOpenRow, 2);       //so it could
     ui->totalsGridLayout->addWidget(addExpenseButton, nextOpenRow, 3);      //look and work
     nextOpenRow--;                                                          //a little better
@@ -691,7 +979,7 @@ void CreateDocument::initializeTotals(int tnum) //Need to fix how qrys are handl
         ui->totalsGridLayout->addWidget(total, buttonRow+3, 3);
 
         connect(box, &QCheckBox::stateChanged,
-                [rate, amount, total] (int state)
+                [rate, amount, this] (int state)
         {
             if (state)
             {
@@ -705,8 +993,8 @@ void CreateDocument::initializeTotals(int tnum) //Need to fix how qrys are handl
             emit total->linkActivated("");
         });
 
-        connect(rate, &QLineEdit::textEdited, [total] () { emit total->linkActivated(""); });
-        connect(amount, &QLineEdit::textEdited, [total] () { emit total->linkActivated(""); });
+        connect(rate, &QLineEdit::textEdited, [this] () { emit total->linkActivated(""); });
+        connect(amount, &QLineEdit::textEdited, [this] () { emit total->linkActivated(""); });
 
         connect(deleteExpenseButton, &QPushButton::clicked,
                 [=] ()
@@ -757,51 +1045,30 @@ void CreateDocument::initializeTotals(int tnum) //Need to fix how qrys are handl
             emit total->linkActivated("");
         });
     });
-
-    if (tnum != 0)
-    {
-        QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-        QSqlQuery qry = QSqlQuery(simdb);
-        simdb.open();
-        qry.exec("SELECT discount_on_taxable_rate, discount_on_taxable, discount_on_tax_exempt_rate, discount_on_tax_exempt "
-            ",tax_rate, tax, discount_after_tax_rate, discount_after_tax, discount_before_tax "
-            "FROM "%docname%" WHERE num = "%QString::number(tnum)%";");
-        qry.next();
-        discountBeforeTax->setChecked(qry.value(8).toBool());
-        fetchRateAndAmount(qry, 0, discountOnTaxable, ui->totalsGridLayout);
-        fetchRateAndAmount(qry, 2, discountOnTaxExempt, ui->totalsGridLayout);
-        fetchRateAndAmount(qry, 4, tax, ui->totalsGridLayout);
-        fetchRateAndAmount(qry, 6, discountAfterTax, ui->totalsGridLayout);
-
-        int row = customExpenseRowStart;
-        qry.exec("SELECT name, rate, value FROM custom_expenses WHERE tflag = "%tflag%" AND tnum = "%QString::number(tnum)%";");
-        while (qry.next())
-        {
-            emit addExpenseButton->clicked();
-            fetchRateAndAmount(qry, 1, qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(row, 3)->widget()), ui->totalsGridLayout, 1);
-            row++;
-        }
-
-    }
 }
 
-void CreateDocument::fetchRateAndAmount(QSqlQuery qry, int rateIndex, QLineEdit *line, QGridLayout *grid, bool custom)
+void CreateDocument::fetchTotals(QSqlQuery qry)
 {
-    int row, trash;
-    grid->getItemPosition(grid->indexOf(line), &row, &trash, &trash, &trash);
+    qry.exec("SELECT discount_on_taxable_rate, discount_on_taxable, discount_on_tax_exempt_rate, discount_on_tax_exempt "
+        ",tax_rate, tax, discount_after_tax_rate, discount_after_tax, discount_before_tax "
+        "FROM "%docname%" WHERE num = "%docnum%";");
+    qry.next();
+    discountBeforeTax->setChecked(qry.value(8).toBool());
+    fetchRateAndAmount(qry, 0, discountOnTaxable, ui->totalsGridLayout);
+    fetchRateAndAmount(qry, 2, discountOnTaxExempt, ui->totalsGridLayout);
+    fetchRateAndAmount(qry, 4, tax, ui->totalsGridLayout);
+    fetchRateAndAmount(qry, 6, discountAfterTax, ui->totalsGridLayout);
 
-    if (qry.value(rateIndex).toDouble() == 0)
+    int row = customExpenseRowStart;
+    qry.exec("SELECT name, rate, value FROM custom_expenses WHERE tflag = "%QString::number(tFlag)%" AND tnum = "%docnum%";");
+    while (qry.next())
     {
-        qobject_cast<QCheckBox*>(grid->itemAtPosition(row, 0)->widget())->setChecked(false);
-        line->setText(qry.value(rateIndex+1).toString());
-    } else {
-        qobject_cast<QCheckBox*>(grid->itemAtPosition(row, 0)->widget())->setChecked(true);
-        qobject_cast<QLineEdit*>(grid->itemAtPosition(row, 1)->widget())->setText(qry.value(rateIndex).toString());
+        emit addExpenseButton->clicked();
+        fetchRateAndAmount(qry, 1, qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(row, 3)->widget()), ui->totalsGridLayout, 1);
+        row++;
     }
-    if (custom)
-        qobject_cast<QLineEdit*>(grid->itemAtPosition(row, 2)->widget())->setText(qry.value(rateIndex-1).toString());
+    emit taxableSubtotal->linkActivated("");
 }
-
 void CreateDocument::deleteCustomExpense()
 {
     QPushButton *button = qobject_cast<QPushButton *>(sender());
@@ -813,10 +1080,14 @@ void CreateDocument::deleteCustomExpense()
         delete child->widget();
         delete child;
     }
-    customButtonRow--;
+    addDetailButtonRow--;
 }
 
-void ResizableTable::initializeColumns(int tflag)
+// ======================================
+// == INITIALIZING THE RESIZABLE TABLE ==
+// ======================================
+
+void ResizableTable::initializeColumns()
 {
     switch (tflag) {
     case 0: {
@@ -873,21 +1144,21 @@ CreateDocument::~CreateDocument()
     delete ui;
 }
 
-//!      ==============================================
-//!      ===== INTERNAL/EXTERNAL & CUSTOM DETAILS =====
-//!      ==============================================
+//!      ==============================================================
+//!      ===== CREATING AND FETCHING INTERNAL / EXTERNAL DETAILS ======
+//!      ==============================================================
 
-void CreateDocument::fetchDetails(QSqlQuery qry, int tFlag, QString docnum)
+void CreateDocument::fetchDetails(QSqlQuery qry)
 {
     switch (tFlag) {
-    case 0: {
+    case PR: {
         ui->detailsNames->setText("Date:\nCreated by:");
-        qry.exec("SELECT pr.date, pr.date_needed, pr.notes, userdata.name, pr.project FROM pr JOIN userdata ON userdata.id = pr.requested_by WHERE pr.num = "+docnum+";");
+        qry.exec("SELECT pr.date, pr.date_needed, pr.notes, userdata.name, pr.project FROM pr JOIN userdata ON userdata.id = pr.requested_by WHERE pr.num = "%docnum%";");
         qry.next();
-        ui->detailsValues->setText(qry.value(0).toString()+"\n"+qry.value(3).toString());
-        ui->dateNeeded->setDate(qry.value(1).toDate());
+        ui->detailsValues->setText(qry.value(0).toString()%"\n"%qry.value(3).toString());
+        ui->internalWidget->findChild<QDateTimeEdit*>("date")->setDate(qry.value(1).toDate());
         ui->notes->setPlainText(qry.value(2).toString());
-        ui->project->setText(qry.value(4).toString());
+        findChild<QLineEdit*>("project")->setText(qry.value(4).toString());
     }
     case 1: {
 
@@ -905,11 +1176,11 @@ void CreateDocument::fetchDetails(QSqlQuery qry, int tFlag, QString docnum)
     }
 }
 
-void CreateDocument::insertRecurringCustomDetails(QSqlQuery qry, QString tableFlag, int *row)
+void CreateDocument::insertRecurringCustomDetails(QSqlQuery qry, int *row)
 {
     ui->gridLayout->removeWidget(ui->addCustom);
     ui->gridLayout->removeWidget(ui->customLabel);
-    qry.exec("SELECT name FROM recurring_custom_fields WHERE tflag = "%tableFlag%";");
+    qry.exec("SELECT name FROM recurring_custom_details WHERE tflag = "%QString::number(tFlag)%";");
     while (qry.next())
     {
         QLabel *label = new QLabel(ui->details);
@@ -924,18 +1195,18 @@ void CreateDocument::insertRecurringCustomDetails(QSqlQuery qry, QString tableFl
     }
     ui->gridLayout->addWidget(ui->customLabel, *row, 0);
     ui->gridLayout->addWidget(ui->addCustom, *row, 1);
-    cfRow = *row;
+    customDetailRow = *row;
 }
 
-void CreateDocument::fetchCustomDetails(QSqlQuery qry, int *row, QString tableFlag, QString docNum, bool editable)
+void CreateDocument::fetchCustomDetails(QSqlQuery qry, int *row, bool editable)
 {
     ui->gridLayout->removeWidget(ui->addCustom);
     ui->gridLayout->removeWidget(ui->customLabel);
-    qry.exec("SELECT count(*) FROM recurring_custom_fields WHERE tflag = "%tableFlag%";");
+    qry.exec("SELECT count(*) FROM recurring_custom_details WHERE tflag = "%QString::number(tFlag)%";");
     qry.next();
-    int rcfCount = qry.value(0).toInt();
-    qry.exec("SELECT name, value FROM custom_fields WHERE tflag = "%tableFlag%" AND tnum = "%docNum%";");
-    for (int i = 0; i < rcfCount; i++)
+    int rcdCount = qry.value(0).toInt(); //recurring Custom Details Count
+    qry.exec("SELECT name, value FROM custom_details WHERE tflag = "%QString::number(tFlag)%" AND tnum = "%docnum%";");
+    for (int i = 0; i < rcdCount; i++)
     {
         qry.next();
         QLabel *label = new QLabel(ui->details);
@@ -949,7 +1220,7 @@ void CreateDocument::fetchCustomDetails(QSqlQuery qry, int *row, QString tableFl
         ui->gridLayout->addWidget(line, *row, 1);
         *row += 1;
     }
-    cfRow = *row;
+    customDetailRow = *row;
     while (qry.next())
     {
         QLineEdit *line1 = new QLineEdit(ui->details);
@@ -977,7 +1248,7 @@ void CreateDocument::fetchCustomDetails(QSqlQuery qry, int *row, QString tableFl
     ui->gridLayout->addWidget(ui->customLabel, *row, 0);
     ui->gridLayout->addWidget(ui->addCustom, *row, 1);
     if (!editable)
-        cfRow = *row;
+        customDetailRow = *row;
 }
 
 void CreateDocument::on_addCustom_clicked()
@@ -993,35 +1264,60 @@ void CreateDocument::on_addCustom_clicked()
     deleteButton->setText("x");
     deleteButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     deleteButton->setStyleSheet("background-color: rgb(255, 0, 4);");
+
     connect(deleteButton, &QPushButton::clicked, this, &CreateDocument::deleteCustomDetail);
 
     ui->gridLayout->removeWidget(ui->addCustom);
     ui->gridLayout->removeWidget(ui->customLabel);
-    ui->gridLayout->addWidget(custom1, customButtonRow, 0);
-    ui->gridLayout->addWidget(custom2, customButtonRow, 1);
-    ui->gridLayout->addWidget(deleteButton, customButtonRow, 2);
-    ui->gridLayout->addWidget(ui->customLabel, customButtonRow+1, 0);
-    ui->gridLayout->addWidget(ui->addCustom, customButtonRow+1, 1);
+    ui->gridLayout->addWidget(custom1, addDetailButtonRow, 0);
+    ui->gridLayout->addWidget(custom2, addDetailButtonRow, 1);
+    ui->gridLayout->addWidget(deleteButton, addDetailButtonRow, 2);
+    ui->gridLayout->addWidget(ui->customLabel, addDetailButtonRow+1, 0);
+    ui->gridLayout->addWidget(ui->addCustom, addDetailButtonRow+1, 1);
 
-    customButtonRow++;
+    customDetailCount++;
+    addDetailButtonRow++;
 }
 
 void CreateDocument::deleteCustomDetail()
 {
-    //This may cause memory leaks. Verify.
     QPushButton *button = qobject_cast<QPushButton *>(sender());
-    int index = ui->gridLayout->indexOf(button);
-    ui->gridLayout->itemAt(index-0)->widget()->~QWidget();
-    ui->gridLayout->itemAt(index-0)->~QLayoutItem();
-    ui->gridLayout->itemAt(index-1)->widget()->~QWidget();
-    ui->gridLayout->itemAt(index-1)->~QLayoutItem();
-    ui->gridLayout->itemAt(index-2)->widget()->~QWidget();
-    ui->gridLayout->itemAt(index-2)->~QLayoutItem();
-    customButtonRow--;
+    int row, trash;
+    ui->gridLayout->getItemPosition(ui->gridLayout->indexOf(button), &row, &trash, &trash, &trash);
+    QLayoutItem *child;
+
+    //delete the selected row
+    for (int i = 0; i < 3; i++) {
+        child = ui->gridLayout->itemAtPosition(row, i);
+        ui->gridLayout->removeItem(child);
+        delete child->widget();
+        delete child;
+    }
+
+    //move all other rows down
+    for (; row < addDetailButtonRow; row++) {
+        child = ui->gridLayout->itemAtPosition(row+1, 0);
+        ui->gridLayout->removeItem(child);
+        ui->gridLayout->addItem(child, row, 0);
+
+        child = ui->gridLayout->itemAtPosition(row+1, 1);
+        ui->gridLayout->removeItem(child);
+        ui->gridLayout->addItem(child, row, 1);
+
+        if (ui->gridLayout->itemAtPosition(row+1, 2) != nullptr)
+        {
+            child = ui->gridLayout->itemAtPosition(row+1, 2);
+            ui->gridLayout->removeItem(child);
+            ui->gridLayout->addItem(child, row, 2);
+        }
+    }
+
+    customDetailCount--;
+    addDetailButtonRow--;
 }
 
 //!      ==========================
-//!      ====== SAVE BUTTONS ======
+//!      =====     SAVING     =====
 //!      ==========================
 
 void CreateDocument::on_cancel_clicked()
@@ -1031,46 +1327,43 @@ void CreateDocument::on_cancel_clicked()
 
 void CreateDocument::on_save_clicked()
 {
-    QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-    QSqlQuery qry(simdb);
-    simdb.open();
-    qry.exec("SELECT (SELECT num FROM "+docname+" ORDER BY num DESC LIMIT 1) + 1;");
+    //Completed documents do not have this option.
+    QSqlQuery qry(db);
+    //Find a suitable docnum for a finalized document
+    db.open();
+    qry.exec("SELECT CASE WHEN (SELECT num FROM "%docname%" WHERE num > 10000) IS NULL "
+                "THEN 10001 "
+                "ELSE (SELECT (SELECT num FROM "%docname%" ORDER BY num DESC LIMIT 1) + 1) "
+             "END;");
     qry.next();
-    simdb.close();
+    db.close();
 
     if (docnum.toInt() == 0) //New Draft
-    {
-        CreateDocument::storeTable(tflag.toInt(), NULL, qry.value(0).toString());
-    }
-    else if (docnum.toInt() < 10000) //Old draft
-    {
-        CreateDocument::storeTable(tflag.toInt(), docnum, qry.value(0).toString());
-    }
+        CreateDocument::storeTable(qry, NULL, qry.value(0).toString(), 1);
+    else //Old draft
+        CreateDocument::storeTable(qry, docnum, qry.value(0).toString(), 1);
+
+    CreateDocument::close();
 }
 
-void CreateDocument::on_saveDraft_clicked() //Completed documents do not have this option
+void CreateDocument::on_saveDraft_clicked(QSqlDatabase db) //Completed documents do not have this option
 {
-    QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-    QSqlQuery qry(simdb);
-    if (docnum.toInt() == 0) //New Draft
-    {
-        //Find a suitable docNum. storeTable() saves to the specified docNum
-        simdb.open();
-        qry.exec("SELECT CASE WHEN (SELECT num FROM "+docname+" WHERE num < 10000) IS NULL "
+    QSqlQuery qry(db);
+    db.open();
+    if (docnum.toInt() == 0) { //New Draft
+        //Find a suitable docnum for a new draft
+        qry.exec("SELECT CASE WHEN (SELECT num FROM "%docname%" WHERE num < 10000) IS NULL "
                         "THEN 1 "
-                        "ELSE ((SELECT num FROM "+docname+" WHERE num < 10000 ORDER BY num DESC LIMIT 1) + 1) "
+                        "ELSE ((SELECT num FROM "%docname%" WHERE num < 10000 ORDER BY num DESC LIMIT 1) + 1) "
                     "END;");
         qry.next();
-        simdb.close();
         docnum = qry.value(0).toString();
-        CreateDocument::storeTable(tflag.toInt(), docnum, docnum);
-        CreateDocument::close();
+        CreateDocument::storeTable(qry, NULL, docnum);
     }
     else //Old draft
-    {
-        CreateDocument::storeTable(tflag.toInt(), docnum, docnum);
-        CreateDocument::close();
-    }
+        CreateDocument::storeTable(qry, docnum, docnum);
+    db.close();
+    CreateDocument::close();
 }
 
 //The validate functions will check to see whether a certain item exists, and insert it if it does not.
@@ -1084,9 +1377,7 @@ bool validateProject(QSqlQuery qry, QString project)
         return true;
     }
     else
-    {
         return false;
-    }
 }
 
 inline QString insertNewSupplier(QSqlQuery qry, QString supplier)
@@ -1168,12 +1459,12 @@ QString validateItem(bool *newEntry, QSqlQuery qry, QString itemNum, QString ite
     }
 }
 
-void CreateDocument::storeCustomExpenses(QSqlQuery qry)
+void CreateDocument::storeCustomExpenses(QSqlQuery qry, QString docnum)
 {
     for (int row = 0; row < customExpenseRowCount; row++)
     {
         qry.exec("INSERT INTO custom_expenses (tflag, tnum, name, rate, value) VALUES ("
-                 %tflag
+                 %QString::number(tFlag)
                  %","%docnum
                  %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(customExpenseRowStart+row,2)->widget())->text())
                  %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(customExpenseRowStart+row,1)->widget())->text())
@@ -1182,33 +1473,28 @@ void CreateDocument::storeCustomExpenses(QSqlQuery qry)
     }
 }
 
-void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDocNum)
+void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDocNum, int status)
 {
-    //This function saves the table as a draft that can be opened later
-    QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-    QSqlQuery qry(simdb);
+    //This function saves the table to the specified document number
+    db.open();
 
-    //Clear out any and all existing values for this table. This is a draft so any old data should be removed.
-    simdb.open();
-    qry.exec("DELETE FROM "%docname%"d WHERE "%docname%"_num = "%oldDocNum%";");
-    qry.exec("DELETE FROM "%docname%" WHERE num = "%oldDocNum%";");
-    qry.exec("DELETE FROM custom_fields WHERE tnum = "%oldDocNum%" AND tflag = "%QString::number(tableFlag)%";");
-    qry.exec("DELETE FROM custom_expenses WHERE tnum = "%oldDocNum%" AND tflag = "%QString::number(tableFlag)%";");
+    //FIRST: Clear out all existing data for this document. Everything will be overwritten.
+    DeleteDocument(qry, oldDocNum);
 
     //Check whether the columns are valid, and insert into the appropriate tables.
-    switch (tableFlag) {
+    switch (tFlag) {
     case 0: { //PR
-        validateProject(qry, ui->project->text());
+        validateProject(qry, findChild<QLineEdit*>("project")->text());
         qry.exec("INSERT INTO pr (num, date, date_needed, requested_by, notes, status, project, discount_before_tax, taxable_subtotal, tax_exempt_subtotal, discount_on_taxable_rate"
             ",discount_on_taxable, discount_on_tax_exempt_rate, discount_on_tax_exempt, tax_rate, tax, discount_after_tax_rate, discount_after_tax, total) VALUES ("
                  %newDocNum
                  %",datetime('now','localtime')"
-                 %",'"%ui->dateNeeded->date().toString("yyyy-MM-dd")%"'"
-                 %","%currentUser
+                 %",'"%ui->internalWidget->findChild<QDateTimeEdit*>("date")->date().toString("yyyy-MM-dd")%"'"
+                 %","%user->id
                  %","%escapeSql(ui->notes->toPlainText())
-                 %",0"
-                 %","%escapeSql(ui->project->text())
-                 %","%QString::number(qobject_cast<QCheckBox*>(ui->internalDetailsGridLayout->itemAtPosition(ui->internalDetailsGridLayout->rowCount()-1,0)->widget())->isChecked())
+                 %","%QString::number(status)
+                 %","%escapeSql(findChild<QLineEdit*>("project")->text())
+                 %","%QString::number(qobject_cast<QCheckBox*>(ui->internalDetailsGrid->itemAtPosition(ui->internalDetailsGrid->rowCount()-1,0)->widget())->isChecked())
                  %","%escapeSql(qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(0,3)->widget())->text())
                  %","%escapeSql(qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(1,3)->widget())->text())
                  %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(2,1)->widget())->text())
@@ -1221,8 +1507,8 @@ void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDoc
                  %","%escapeSql(qobject_cast<QLineEdit*>(ui->totalsGridLayout->itemAtPosition(8,3)->widget())->text())
                  %","%escapeSql(qobject_cast<QLabel*>(ui->totalsGridLayout->itemAtPosition(customExpenseRowStart+customExpenseRowCount+2,3)->widget())->text())
             %");");
-        storeCustomExpenses(qry);
-        table->storeTableDetails(qry, newDocNum, tableFlag);
+        storeCustomExpenses(qry, newDocNum);
+        table->storeRows(qry, newDocNum);
         break;
     }
     case 1: { //QR
@@ -1232,48 +1518,32 @@ void CreateDocument::storeTable(int tableFlag, QString oldDocNum, QString newDoc
         break;
     }
     }
-    //Insert custom expenses.
-    //Insert custom rows. This should become a function.
-    QString customName, customValue;
-    for (int i = 1; i < cfRow; i++)
-    {
-        if (QLabel *label = qobject_cast<QLabel *>(ui->gridLayout->itemAt(i*2)->widget()))
-        {
-            customName = escapeSql(label->text());
-        } else {
-            customName = escapeSql(qobject_cast<QLineEdit *>(ui->gridLayout->itemAt((i*2))->widget())->text());
-        }
-        if (QLabel *label = qobject_cast<QLabel *>(ui->gridLayout->itemAt((i*2)+1)->widget()))
-        {
-            customValue = escapeSql(label->text());
-        } else {
-            customValue = escapeSql(qobject_cast<QLineEdit *>(ui->gridLayout->itemAt(i*2+1)->widget())->text());
-        }
-        qry.exec(QString("INSERT INTO custom_fields (tflag, tnum, name, value) VALUES (%1, %2, %3, %4);")
-                .arg(QString::number(tableFlag), newDocNum, customName, customValue));
-    }
-    for (int i = cfRow; i < customButtonRow; i++)
-    {
-        if (QLabel *label = qobject_cast<QLabel *>(ui->gridLayout->itemAt((i*2)+i-cfRow)->widget()))
-            customName = escapeSql(label->text());
-        else
-            customName = escapeSql(qobject_cast<QLineEdit *>(ui->gridLayout->itemAt((i*2)+i-cfRow)->widget())->text());
 
-        if (QLabel *label = qobject_cast<QLabel *>(ui->gridLayout->itemAt((i*2)+i-cfRow+1)->widget()))
-            customValue = escapeSql(label->text());
-        else
-            customValue = escapeSql(qobject_cast<QLineEdit *>(ui->gridLayout->itemAt((i*2)+i-cfRow+1)->widget())->text());
+    storeCustomDetails(qry, newDocNum);
 
-        qry.exec(QString("INSERT INTO custom_fields (tflag, tnum, name, value) VALUES (%1, %2, %3, %4);")
-                .arg(QString::number(tableFlag), newDocNum, customName, customValue));
-    }
-    simdb.close();
 }
 
-void ResizableTable::storeTableDetails(QSqlQuery qry, QString docnum, int tableFlag)
+void CreateDocument::storeCustomDetails(QSqlQuery qry, QString docnum)
 {
-    switch (tableFlag) {
-    case 0: {
+    //custom details always start from row 1
+    int row = 1;
+    QString name, value;
+    for (; row < recurringCustomDetailCount; row ++) {
+        name = escapeSql(qobject_cast<QLabel*>(ui->gridLayout->itemAtPosition(row, 0)->widget())->text());
+        value = escapeSql(qobject_cast<QLineEdit*>(ui->gridLayout->itemAtPosition(row, 1)->widget())->text());
+        qry.exec("INSERT INTO custom_details (tflag, tnum, name, value, flag) VALUES ("%QString::number(tFlag)%","%docnum%","%name%","%value%",0);");
+    }
+    for (; row < addDetailButtonRow; row ++) {
+        name = escapeSql(qobject_cast<QLineEdit*>(ui->gridLayout->itemAtPosition(row, 0)->widget())->text());
+        value = escapeSql(qobject_cast<QLineEdit*>(ui->gridLayout->itemAtPosition(row, 1)->widget())->text());
+        qry.exec("INSERT INTO custom_details (tflag, tnum, name, value, flag) VALUES ("%QString::number(tFlag)%","%docnum%","%name%","%value%",1);");
+    }
+}
+
+void ResizableTable::storeRows(QSqlQuery qry, QString docnum)
+{
+    switch (tflag) {
+    case PR: {
         for (int row = 0; row < finalRow; row++)
         {
             checkItem(qry, row);
@@ -1290,7 +1560,7 @@ void ResizableTable::storeTableDetails(QSqlQuery qry, QString docnum, int tableF
         }
         break;
     }
-    case 1: {
+    case QR: {
         for (int i = 0; i < finalRow; i++)
         {
 
@@ -1308,8 +1578,8 @@ void ResizableTable::resizeEvent(QResizeEvent *event) //This is called multiple 
 {
     int w = width();
     //Resizing windows based on tFlag
-    switch (tflag.toInt()) {
-    case 0: {
+    switch (tflag) {
+    case PR: {
         //{"id", "Item ID", "Description", "Qty", "Unit","sid", "Recommended Supplier", "taxable", "Expected Price", "total", "Status"};
         w = w / 22;
         setColumnWidth(cid.itemNum  ,w*3);
@@ -1326,16 +1596,13 @@ void ResizableTable::resizeEvent(QResizeEvent *event) //This is called multiple 
     }
 }
 
-void CreateDocument::DeleteDocument()
+void CreateDocument::DeleteDocument(QSqlQuery qry, QString docnum)
 {
-    QSqlDatabase simdb = QSqlDatabase::database("sim", false);
-    QSqlQuery qry(simdb);
-    simdb.open();
-    qry.exec("DELETE FROM "%docname%" WHERE num = "%docnum%";");
+    QString tflag = QString::number(tFlag);
     qry.exec("DELETE FROM "%docname%"d WHERE "%docname%"_num = "%docnum%";");
-    qry.exec("DELETE FROM custom_fields WHERE tflag = "%tflag%" AND tid = "%docnum%";");
-    simdb.close();
-    CreateDocument::close();
+    qry.exec("DELETE FROM "%docname%" WHERE num = "%docnum%";");
+    qry.exec("DELETE FROM custom_details WHERE tnum = "%docnum%" AND tflag = "%QString::number(tFlag)%";");
+    qry.exec("DELETE FROM custom_expenses WHERE tnum = "%docnum%" AND tflag = "%QString::number(tFlag)%";");
 }
 
 void ResizableTable::appendRow()
@@ -1350,8 +1617,8 @@ void ResizableTable::appendRow()
     customLineEdit(finalRow, Item);
     setColumnHidden(cid.itemId,true);
 
-    switch (tflag.toInt()) {
-    case 0: { //PR
+    switch (tflag) {
+    case PR: {
         customLineEdit(finalRow, Supplier);
         customCheckBox(finalRow, cid.taxable);
         customLineEdit(finalRow, Blank, cid.total);
@@ -1359,21 +1626,21 @@ void ResizableTable::appendRow()
         setColumnHidden(cid.status,true); //status
         break;
     }
-    case 1: { //QR
+    case QR: {
         setColumnHidden(cid.status, true); //status
         break;
     }
-    case 2: { //PO
+    case PO: {
         setColumnHidden(cid.status, true); //status
         break;
     }
     }
 }
 
-void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
+void ResizableTable::fetchRows(QSqlQuery qry, QString docnum)
 {
-    switch (tFlag) {
-    case 0: {
+    switch (tflag) {
+    case PR: {
         qry.exec("SELECT prd.item_id, items.num, items.desc, items.cat, prd.qty, items.unit, prd.supplier_id, suppliers.name, prd.taxable, prd.expected_unit_price, prd.total, prd.status "
         "FROM prd "
         "LEFT JOIN items ON items.id = prd.item_id "
@@ -1381,32 +1648,32 @@ void ResizableTable::fetchRows(QSqlQuery qry, int tFlag, QString docnum)
         "WHERE prd.pr_num = "%docnum%";");
         break;
     }
-    case 1: {
+    case QR: {
         qry.exec("SELECT qrd.item_id, items.num, items.desc, items.cat, qrd.qty, qrd.unit, qrd.unit_price, qrd.total, qrd.status "
             "FROM qrd "
             "LEFT JOIN items ON items.id = qrd.item_id "
-            "WHERE qrd.qr_num = "+docnum+";");
+            "WHERE qrd.qr_num = "%docnum%";");
         break;
     }
-    case 2: {
+    case PO: {
         qry.exec("SELECT pod.item_id, items.num, items.desc, items.cat, pod.unit, pod.unit_price, pod.taxable, pod.total, pod.status "
             "FROM pod "
             "LEFT JOIN items ON items.id = pod.item_id "
-            "WHERE pod.po_num = "+docnum+";");
+            "WHERE pod.po_num = "%docnum%";");
         break;
     }
-    case 3: {
+    case RR: {
         qry.exec("SELECT rrd.item_id, items.num, items.desc, items.cat, rrd.qty, rrd.unit, rrd.condition "
             "FROM rrd "
             "LEFT JOIN items ON items.id = rrd.item_id "
-            "WHERE rrd.rr_num = "+docnum+";");
+            "WHERE rrd.rr_num = "%docnum%";");
         break;
     }
-    case 4: {
+    case MR: {
         qry.exec("SELECT mrd.item_id, items.num, items.desc, items.cat, mrd.qty, mrd.unit "
             "FROM mrd "
             "LEFT JOIN items ON items.id = mrd.item_id "
-            "WHERE mrd.mr_num = "+docnum+";");
+            "WHERE mrd.mr_num = "%docnum%";");
         break;
     }
     }
@@ -1450,17 +1717,18 @@ void ResizableTable::customCheckBox(int row, int column)
     layout->addWidget(box);
     setCellWidget(row,column,widget);
 
-    connect(box, &QCheckBox::stateChanged,
-            [=] ()
+    connect(box, &QCheckBox::stateChanged, this,
+            [this, row] ()
     {
-        updateTotal(row);
+        updateRowTotal(row);
     });
+
 }
 
 //The following function exists because editingFinished is not emitted when QCompleter is activated by clicking
-void connectCompleterToLine(QLineEdit *line)
+inline void emitSignalOnCompletion(QLineEdit *line)
 {
-    QObject::connect(line->completer(), static_cast<void(QCompleter::*)(const QModelIndex &index)>(&QCompleter::activated),
+    QObject::connect(line->completer(), static_cast<void(QCompleter::*)(const QModelIndex &index)>(&QCompleter::activated), line,
             [line] () { emit line->editingFinished(); } );
 }
 
@@ -1506,7 +1774,7 @@ inline void ResizableTable::initCompanionLineEdit(int row, int column, QLineEdit
             });
 
     sourceLine->setCompleter(completer);
-    connectCompleterToLine(sourceLine);
+    emitSignalOnCompletion(sourceLine);
     setCellWidget(row, column, sourceLine);
     return;
 }
@@ -1528,7 +1796,7 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
     switch (type) {
     case Item: {
         line->setObjectName("item");
-        QCompleter *completer = new QCompleter(itemModel, line);
+        QCompleter *completer = new QCompleter(parentDoc->findChild<QSqlQueryModel*>(QString::number(ModelFlag::Item)), line);
         completer->setCompletionColumn(1);
         completer->setFilterMode(Qt::MatchContains);
         completer->setCaseSensitivity(Qt::CaseSensitive); //I would like these completers to be case insensitive, but it causes problems right now when two different items are identical except for the cases.
@@ -1537,11 +1805,11 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
         QLineEdit *catLine = new QLineEdit(this);
         QLineEdit *unitLine = new QLineEdit(this);
 
-        initCompanionLineEdit(row, cid.itemDesc, descLine, line, catLine, unitLine, cssclear1, cssalert1);
-        initCompanionLineEdit(row, cid.unit, unitLine, line, descLine, catLine, cssclear1, cssalert1);
-        initCompanionLineEdit(row, cid.cat, catLine, line, descLine, unitLine, cssclear1, cssalert1);
+        initCompanionLineEdit(row, cid.itemDesc, descLine, line, catLine, unitLine, CSS::Normal, CSS::Alert);
+        initCompanionLineEdit(row, cid.unit, unitLine, line, descLine, catLine, CSS::Normal, CSS::Alert);
+        initCompanionLineEdit(row, cid.cat, catLine, line, descLine, unitLine, CSS::Normal, CSS::Alert);
 
-        QObject::connect(line, &QLineEdit::editingFinished,
+        QObject::connect(line, &QLineEdit::editingFinished, this,
                 [=] ()
                 {
                     // The below function is redundant, but it must be called for QCompleter to function as intended. QCompleter emits an
@@ -1561,10 +1829,10 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
                         changeCompletionModel(unitLine, stringAt(completer, 0), stringAt(completer, 3));
                         changeCompletionModel(catLine, stringAt(completer, 0), stringAt(completer, 4));
 
-                        line->setStyleSheet(cssclear1);
-                        descLine->setStyleSheet(cssclear1);
-                        catLine->setStyleSheet(cssclear1);
-                        unitLine->setStyleSheet(cssclear1);
+                        line->setStyleSheet(CSS::Normal);
+                        descLine->setStyleSheet(CSS::Normal);
+                        catLine->setStyleSheet(CSS::Normal);
+                        unitLine->setStyleSheet(CSS::Normal);
                     }
                     else
                     {
@@ -1574,42 +1842,42 @@ void ResizableTable::customLineEdit(int row, lineType type, int column)
                         changeCompletionModel(unitLine, "", "");
                         changeCompletionModel(catLine, "", "");
 
-                        line->setStyleSheet(cssalert1);
-                        descLine->setStyleSheet(cssalert1);
-                        catLine->setStyleSheet(cssalert1);
-                        unitLine->setStyleSheet(cssalert1);
+                        line->setStyleSheet(CSS::Alert);
+                        descLine->setStyleSheet(CSS::Alert);
+                        catLine->setStyleSheet(CSS::Alert);
+                        unitLine->setStyleSheet(CSS::Alert);
                     }
                 });
 
         line->setCompleter(completer);
-        connectCompleterToLine(line);
+        emitSignalOnCompletion(line);
         setCellWidget(row, cid.itemNum, line);
         break;
     }
     case Supplier: {
         line->setObjectName("supplier");
-        QCompleter *completer = new QCompleter(supplierModel, line);
+        QCompleter *completer = new QCompleter(parentDoc->findChild<QSqlQueryModel*>(QString::number(ModelFlag::Supplier)), line);
         completer->setCompletionColumn(1);
         completer->setFilterMode(Qt::MatchContains);
         completer->setCaseSensitivity(Qt::CaseSensitive);
-        QObject::connect(line, &QLineEdit::editingFinished,
-                [=] ()
+        QObject::connect(line, &QLineEdit::editingFinished, this,
+                [row, line, completer, this] ()
                 {
                     completer->setCompletionPrefix(line->text());
                     if(completer->currentCompletion() == line->text())
                     {
                         item(row, cid.supplierId)->setText(stringAt(completer, 0));
-                        line->setStyleSheet(cssclear1);
+                        line->setStyleSheet(CSS::Normal);
                     }
                     else
                     {
                         item(row, cid.supplierId)->setText("");
-                        line->setStyleSheet(cssalert1);
+                        line->setStyleSheet(CSS::Alert);
                     }
                 });
         setCellWidget(row, cid.supplier, line);
-        connectCompleterToLine(line);
         line->setCompleter(completer);
+        emitSignalOnCompletion(line);
         break;
     }
     case Blank: {
