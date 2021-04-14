@@ -9,11 +9,12 @@
 
 enum Privelage : int {Viewer, Mechanic, Purchasing, InventoryManager, Admin};
 enum TableFlag : unsigned char {
+    PR = 0, QR = 1, PO = 2, RR = 3, MR = 4,
+    PRD, QRD, POD, RRD, MRD,
     InventoryHistory,
     Items, ItemDetails,
     Projects, ProjectDetails,
     Suppliers, SupplierDetails,
-    PR, PRD, QR, QRD, PO, POD, RR, RRD, MR, MRD,
 };
 
 struct User {

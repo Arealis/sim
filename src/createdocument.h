@@ -171,7 +171,7 @@ enum ModelFlag {Item, Supplier, Project, Custom};
 QSqlQueryModel *initModel(ModelFlag modelFlag, QSqlDatabase db, QWidget *parent, QString query = NULL);
 
 QDateTimeEdit *initDateTimeEdit(QWidget *parent);
-QLineEdit *initCompletedLineEdit(QSqlQueryModel *model, QWidget *parent = nullptr, int column = NULL);
+QLineEdit *initCompletedLineEdit(QSqlQueryModel *model, QWidget *parent = nullptr, int column = 0);
 QWidget *initInfoWidget(QWidget *parent, QString title);
 QWidget *initInfoWidget(QWidget *parent, QString title, QSqlQueryModel *model);
 

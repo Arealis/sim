@@ -531,7 +531,6 @@ inline void MainWindow::setHiddenColumns(Headers ... columnHeaders)
 
 void MainWindow::displayTable(TableFlag tableFlag, QString title, QSqlDatabase database, QString query)
 {
-
     currentTable = tableFlag;
     ui->tableLabel->setText(title);
     ui->SearchBox->clear();
@@ -551,6 +550,8 @@ void MainWindow::displayTable(TableFlag tableFlag, QString title, QSqlDatabase d
         ui->table->showColumn(column);
     getHeaders();
     ui->table->update();
+
+    qDebug() << static_cast<TableFlag>(currentTable) << qry.lastError();
 }
 
 /*  TODO: Additional functions needed:
@@ -1205,10 +1206,8 @@ void MainWindow::on_SearchBox_returnPressed()
     if (!ui->SearchBox->text().isEmpty()) {
         //This query is dangerous, because the searchTerm is not escaped
         QString newQuery = "SELECT * FROM ("%query.chopped(1)%") WHERE `"%ui->SearchForDropdown->currentText()%"` LIKE "%escapeSql("%"%ui->SearchBox->text()%"%")%";";
-        qDebug() << newQuery;
         simdb.open();
         qry.exec(newQuery);
-        qDebug() << qry.lastError();
         model->setQuery(qry);
         while (model->canFetchMore()) {model->fetchMore();}
     }

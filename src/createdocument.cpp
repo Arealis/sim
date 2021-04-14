@@ -237,6 +237,8 @@ CreateDocument::CreateDocument(TableFlag tableFlag, QString docnum, User *user, 
         //  TODO: check what this is in the database
         break;
     }
+    default:
+        break;
     }
 
     //      LAST: Import elements from an existing document, or set defaults if new draft
@@ -294,7 +296,7 @@ CreateDocument::CreateDocument(TableFlag tableFlag, QString docnum, User *user, 
     confirm->setWindowTitle("Delete?");
     connect(ui->deleteDraft, &QPushButton::clicked, confirm, &QMessageBox::exec);
     connect(confirm, &QMessageBox::rejected, confirm, &QMessageBox::close);
-    connect(confirm, &QMessageBox::accepted, [this, qry, docnum] () {
+    connect(confirm, &QMessageBox::accepted, confirm, [this, qry, docnum] () {
         db.open();
         CreateDocument::DeleteDocument(qry, docnum);
         db.close();
@@ -811,11 +813,12 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
     total = createTotalsLabel(nullptr, &nextOpenRow, "Grand Total", ui->totalsWidget, ui->totalsGridLayout);
     line2 = createTotalsLine(&nextOpenRow, ui->totalsWidget, ui->totalsGridLayout);
     customExpenseRowStart = nextOpenRow;                                    //See this...
-    addExpenseLabel = new QLabel("Add Expense", ui->totalsWidget);          //this here
-    addExpenseButton = new QPushButton("%", ui->totalsWidget);              //could be outsourced
-    ui->totalsGridLayout->addWidget(addExpenseLabel, nextOpenRow, 2);       //so it could
-    ui->totalsGridLayout->addWidget(addExpenseButton, nextOpenRow, 3);      //look and work
-    nextOpenRow--;                                                          //a little better
+    addExpenseLabel = new QLabel("Add Expense", ui->totalsWidget);          //although this is only called once
+    addExpenseLabel->setAlignment(Qt::AlignRight);                          //it could be placed inside of a function
+    addExpenseButton = new QPushButton("+", ui->totalsWidget);              //so that the creation of everything would
+    ui->totalsGridLayout->addWidget(addExpenseLabel, nextOpenRow, 2);       //be neater and clearer. Everything might
+    ui->totalsGridLayout->addWidget(addExpenseButton, nextOpenRow, 3);      //look and work a little better. But maybe
+    nextOpenRow--;                                                          //that's stupid.
     discountAfterTax = createTotalsLineEdit(total, &nextOpenRow, "Discount", ui->totalsWidget, ui->totalsGridLayout, 0);
     tax = createTotalsLineEdit(total, &nextOpenRow, "Tax", ui->totalsWidget, ui->totalsGridLayout);
     taxExemptAmount = createTotalsLabel(total, &nextOpenRow, "Tax Exempted Amount", ui->totalsWidget, ui->totalsGridLayout);
@@ -837,7 +840,7 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
     setTotalsRowHidden(ui->totalsGridLayout, discountAfterTax, true);
 
     //Connecting the triggers to hide and unhide rows (the triggers to hide a row are labeled in the ASCII table above in the [square] brackets.
-    connect(discountBeforeTax, &QCheckBox::stateChanged,
+    connect(discountBeforeTax, &QCheckBox::stateChanged, ui->totalsGridLayout,
             [=] (int state)
     {
         if (state)
@@ -864,7 +867,7 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
         emit taxableAmount->linkActivated("");
     });
 
-    connect(taxExemptSubtotal, &QLabel::linkActivated,
+    connect(taxExemptSubtotal, &QLabel::linkActivated, ui->totalsGridLayout,
             [=] ()
     {
         if (taxExemptSubtotal->text().toDouble() == 0)
@@ -885,7 +888,7 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
         emit taxableAmount->linkActivated("");
     });
 
-    connect(discountOnTaxable, &QLineEdit::textChanged,
+    connect(discountOnTaxable, &QLineEdit::textChanged, ui->totalsGridLayout,
             [=] (const QString &text)
     {
         if (text.toDouble() == 0 && discountOnTaxExempt->text().toDouble() == 0)
@@ -902,7 +905,7 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
         emit taxableAmount->linkActivated("");
     });
 
-    connect(discountOnTaxExempt, &QLineEdit::textChanged,
+    connect(discountOnTaxExempt, &QLineEdit::textChanged, ui->totalsGridLayout,
             [=] (const QString &text)
     {
         if (text.toDouble() == 0 && discountOnTaxable->text().toDouble() == 0)
@@ -919,7 +922,7 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
         emit taxableAmount->linkActivated("");
     });
 
-    connect(addExpenseButton, &QPushButton::clicked,
+    connect(addExpenseButton, &QPushButton::clicked, this,
             [=] ()
     //The following lambda function is based off of the addCustomField a function.
     //and the createTotals function. It is redundant in a lot of places, and could
@@ -927,9 +930,8 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
     {
         customExpenseRowCount++;
 
-        int buttonIndex, buttonRow, trash; //trash exists as a junk pointer that will never be read.
+        int buttonRow, trash; //trash exists as a junk pointer that will never be read.
         ui->totalsGridLayout->getItemPosition(ui->totalsGridLayout->indexOf(addExpenseButton), &buttonRow, &trash, &trash, &trash);
-        buttonIndex = ui->totalsGridLayout->indexOf(addExpenseButton);
 
         QCheckBox *box = new QCheckBox(ui->totalsWidget);
 
@@ -1090,7 +1092,7 @@ void CreateDocument::deleteCustomExpense()
 void ResizableTable::initializeColumns()
 {
     switch (tflag) {
-    case 0: {
+    case PR: {
         colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "sid", "Recommended Supplier", "Tax?", "Expected Unit Price", "Total", "Status"};
         cid.supplierId = 6;
         cid.supplier = 7;
@@ -1100,14 +1102,14 @@ void ResizableTable::initializeColumns()
         cid.status = 11;
         break;
     }
-    case 1: {
+    case QR: {
         colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "Unit Price", "Total", "Status"};
         cid.unitPrice = 6;
         cid.total = 7;
         cid.status = 8;
         break;
     }
-    case 2: {
+    case PO: {
         colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "Unit Price", "Tax?", "Total", "Status"};
         cid.unitPrice = 6;
         cid.taxable = 7;
@@ -1115,15 +1117,17 @@ void ResizableTable::initializeColumns()
         cid.status = 9;
         break;
     }
-    case 3: {
+    case RR: {
         colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit", "Condition"};
         cid.status = 6;
         break;
     }
-    case 4: {
+    case MR: {
         colNames = {"id", "Item ID", "Description", "Category", "Qty", "Unit"};
         break;
     }
+    default:
+        break;
     }
 }
 
@@ -1160,19 +1164,21 @@ void CreateDocument::fetchDetails(QSqlQuery qry)
         ui->notes->setPlainText(qry.value(2).toString());
         findChild<QLineEdit*>("project")->setText(qry.value(4).toString());
     }
-    case 1: {
+    case QR: {
 
         break;
     }
-    case 2: {
+    case PO: {
         break;
     }
-    case 3: {
+    case RR: {
         break;
     }
-    case 4: {
+    case MR: {
         break;
     }
+    default:
+        break;
     }
 }
 
@@ -1483,7 +1489,7 @@ void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDoc
 
     //Check whether the columns are valid, and insert into the appropriate tables.
     switch (tFlag) {
-    case 0: { //PR
+    case PR: {
         validateProject(qry, findChild<QLineEdit*>("project")->text());
         qry.exec("INSERT INTO pr (num, date, date_needed, requested_by, notes, status, project, discount_before_tax, taxable_subtotal, tax_exempt_subtotal, discount_on_taxable_rate"
             ",discount_on_taxable, discount_on_tax_exempt_rate, discount_on_tax_exempt, tax_rate, tax, discount_after_tax_rate, discount_after_tax, total) VALUES ("
@@ -1511,12 +1517,14 @@ void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDoc
         table->storeRows(qry, newDocNum);
         break;
     }
-    case 1: { //QR
+    case QR: {
         break;
     }
-    case 2: { //PO
+    case PO: {
         break;
     }
+    default:
+        break;
     }
 
     storeCustomDetails(qry, newDocNum);
@@ -1567,6 +1575,8 @@ void ResizableTable::storeRows(QSqlQuery qry, QString docnum)
         }
         break;
     }
+    default:
+        break;
     }
 }
 
@@ -1593,6 +1603,8 @@ void ResizableTable::resizeEvent(QResizeEvent *event) //This is called multiple 
         setColumnWidth(cid.total    ,w*2);
         horizontalHeader()->setStretchLastSection(true);
     }
+    default:
+        break;
     }
 }
 
@@ -1601,8 +1613,8 @@ void CreateDocument::DeleteDocument(QSqlQuery qry, QString docnum)
     QString tflag = QString::number(tFlag);
     qry.exec("DELETE FROM "%docname%"d WHERE "%docname%"_num = "%docnum%";");
     qry.exec("DELETE FROM "%docname%" WHERE num = "%docnum%";");
-    qry.exec("DELETE FROM custom_details WHERE tnum = "%docnum%" AND tflag = "%QString::number(tFlag)%";");
-    qry.exec("DELETE FROM custom_expenses WHERE tnum = "%docnum%" AND tflag = "%QString::number(tFlag)%";");
+    qry.exec("DELETE FROM custom_details WHERE tnum = "%docnum%" AND tflag = "%tflag%";");
+    qry.exec("DELETE FROM custom_expenses WHERE tnum = "%docnum%" AND tflag = "%tflag%";");
 }
 
 void ResizableTable::appendRow()
@@ -1634,6 +1646,8 @@ void ResizableTable::appendRow()
         setColumnHidden(cid.status, true); //status
         break;
     }
+    default:
+        break;
     }
 }
 
@@ -1676,6 +1690,8 @@ void ResizableTable::fetchRows(QSqlQuery qry, QString docnum)
             "WHERE mrd.mr_num = "%docnum%";");
         break;
     }
+    default:
+        break;
     }
     //Table items can have a line edit as their primary display. The following loop accounts for this.
     for (int i = 0; qry.next(); i++)
@@ -1747,7 +1763,7 @@ inline void ResizableTable::initCompanionLineEdit(int row, int column, QLineEdit
     completer->setCaseSensitivity(Qt::CaseInsensitive);
     completer->setCompletionColumn(1);
 
-    QObject::connect(sourceLine, &QLineEdit::editingFinished,
+    QObject::connect(sourceLine, &QLineEdit::editingFinished, this,
            [=] ()
             {
                 // This does not need a setCompleterPrefix function since there can only ever be one completion in this column

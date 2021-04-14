@@ -459,7 +459,7 @@
        <widget class="QPlainTextEdit" name="notes">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Minimum" vsizetype="Ignored">
-          <horstretch>4</horstretch>
+          <horstretch>10</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
