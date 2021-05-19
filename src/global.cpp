@@ -37,12 +37,13 @@ QString escapeSql(QString string) //This will escape the (') string delimiter in
     return "'"%string%"'";
 }
 
+//return string if not null
 QString returnStringINN(QString string, QString ifNotNull, QString ifNull)
 {
     if (string.isEmpty())
         return ifNull;
     else
-        return ifNotNull;
+        return (ifNotNull.isNull() ? string : ifNotNull);
 }
 
 void User::clear()

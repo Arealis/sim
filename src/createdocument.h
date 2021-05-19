@@ -14,6 +14,7 @@
 #include <QCheckBox>
 #include <QGridLayout>
 #include <QPlainTextEdit>
+#include <QComboBox>
 
 #include "global.h"
 
@@ -38,8 +39,8 @@ public:
         char itemNum = 1;
         char itemDesc = 2;
         char cat = 3;
-        char qty = 4;
-        char unit = 5;
+        char unit = 4;
+        char qty = 5;
         char unitPrice;
         char supplierId;
         char supplier;
@@ -47,6 +48,9 @@ public:
         char total;
         char taxable;
         char project;
+        char notes;
+        char prdId;
+        char condition;
     };
 
     QSqlDatabase db;
@@ -64,20 +68,23 @@ public:
     QMenu *menu;
     QAction *deleteRow;
 
+    void calculateSubtotal(int row);
 
-    void updateRowTotal(int row);
+    void storeRows(QSqlQuery qry, QString docnum, QString status);
 
-    void storeRows(QSqlQuery qry, QString docnum);
-
-    void fetchRows(QSqlQuery qry, QString docnum);
+    void fetchRows(QSqlQuery qry, QString docnum, TableFlag modifier = PR); //The modifier is set to PR by default because PR has no purpose as a modifier.
 
     void appendRow();
 
-    void checkItem(QSqlQuery qry, int row);
+    bool itemEntryValid(int row);
+
+    bool qtyEntryValid(int row);
+
+    QString validateItemId(QSqlQuery qry, int row);
 
     void checkProject(QSqlQuery qry, int row);
 
-    void checkSupplier(QSqlQuery qry, int row);
+    QString validateSupplierId(QSqlQuery qry, int row);
 
     void resizeEvent(QResizeEvent *event);
 
@@ -85,9 +92,9 @@ public:
 
     void changeCompletionModel(QLineEdit *line, QString itemId, QString value);
 
-    enum lineType {Item, Supplier, Blank};
-    void customLineEdit(int row, lineType type, int column = 0);
-    void customCheckBox(int row, int column);
+    enum lineType {Item, Supplier, Disabled};
+    void initLineEdit(int row, lineType type, int column = 0);
+    void initTaxCheckBox(int row, int column);
 
     void initializeColumns();
 
@@ -100,13 +107,14 @@ private:
     Q_OBJECT
 
 public:
-    explicit CreateDocument(TableFlag tableFlag, QString docnum, User *user, QString databaseName, QWidget *parent = nullptr);
+    explicit CreateDocument(TableFlag tableFlag, QString docNum, User *userData, QString connectionName, QWidget *parent = nullptr, bool authorizer = true);
     ~CreateDocument();
 
     User *user;
+    bool authorized;
     TableFlag tFlag;
     QSqlDatabase db;
-    QString docname, docnum;
+    QString docname, docnum, totalsColumns;
     int customDetailRow, customDetailCount, addDetailButtonRow, recurringCustomDetailCount, customExpenseRowStart, customExpenseRowCount, taxableAmountRow;
     bool taxExempt, discBeforeTax;
 
@@ -119,13 +127,29 @@ public:
     QFrame *line1, *line2;
     QPushButton *addExpenseButton;
 
+    void clear();
+
+    //Finds the row of a model that matches the given string
+    inline int matchingRow(QString matchString, QAbstractItemModel *model, int matchColumn = 1);
+
+    bool documentEntryValid();
+    inline bool supplierEntryValid();
+    QString validateSupplierId(QSqlQuery qry, QString supplierId, QString supplierName, QString addressId = QString(), QString info = QString());
+
     void initTotals();
 
-    void updateTotal(double total, bool isTaxExempt);
+    void setSubtotal(double total, bool isTaxExempt);
+
+    enum WidgetType{ShippingAddress, BillingAddress, Supplier};
+    QWidget *initStaticInfoWidget(QWidget *parent, WidgetType widgetType, QString title = QString());
+
+    QWidget *initDynamicInfoWidget(QWidget *parent, WidgetType widgetType,  QSqlDatabase db, QString title = QString());
 
 private slots:
 
     void fetchTotals(QSqlQuery qry);
+
+    QString fetchTotalsValuesForSql();
 
     void fetchRateAndAmount(QSqlQuery qry, int rateIndex, QLineEdit *line, QGridLayout *grid, bool custom = 0);
 
@@ -143,7 +167,7 @@ private slots:
 
     void on_cancel_clicked();
 
-    void on_saveDraft_clicked(QSqlDatabase db);
+    void on_saveDraft_clicked();
 
     void storeCustomExpenses(QSqlQuery qry, QString docnum);
 
@@ -153,42 +177,41 @@ private slots:
 
     void insertRecurringCustomDetails(QSqlQuery qry, int *row);
 
-    void fetchCustomDetails(QSqlQuery qry, int *row, bool editable);
+    void fetchCustomDetails(QSqlQuery qry, bool editable);
 
     void deleteCustomDetail();
 
-    void deleteCustomExpense();
-
-    void fetchDetails(QSqlQuery qry);
+    void fetchDetails(QSqlQuery qry, QString docnum, TableFlag modifier = PR); //The modifier is set to PR by default because PR has no purpose as a modifier.
 
     void DeleteDocument(QSqlQuery qry, QString docnum);
+
 
 private:
     Ui::CreateDocument *ui;
 };
 
-enum ModelFlag {Item, Supplier, Project, Custom};
-QSqlQueryModel *initModel(ModelFlag modelFlag, QSqlDatabase db, QWidget *parent, QString query = NULL);
+enum ModelFlag {Item, Supplier, Project};
+QSqlQueryModel *initReadOnlyModel(ModelFlag modelFlag, QSqlDatabase db, QWidget *parent);
+QStandardItemModel *initReadWriteModel(ModelFlag modelFlag, QSqlDatabase db, QWidget *parent);
 
+QComboBox *initComboBox(QAbstractItemModel *model, QWidget *parent);
 QDateTimeEdit *initDateTimeEdit(QWidget *parent);
-QLineEdit *initCompletedLineEdit(QSqlQueryModel *model, QWidget *parent = nullptr, int column = 0);
-QWidget *initInfoWidget(QWidget *parent, QString title);
-QWidget *initInfoWidget(QWidget *parent, QString title, QSqlQueryModel *model);
+QLineEdit *initCompletedLineEdit(QSqlQueryModel *model, QWidget *parent = nullptr);
 
-void infoWidgetConnector(QLineEdit *line, bool success);
 inline void onCompletion(QLineEdit *line, void (*function)(QLineEdit*, bool) = nullptr);
 
-bool validateProject(QSqlQuery qry, QString project);
-QString validateSupplier(QSqlQuery qry, QString supplier, bool *newEntry);
-QString validateItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit, QString category);
+inline bool POIsValidAndOpen(QSqlQuery qry, QString poNum);
+QString validateProject(QSqlQuery qry, QString project);
+QString validateAddressId(QSqlQuery qry, QString address, QString addressId = QString());
 
-inline QString insertNewSupplier(QSqlQuery qry, QString supplier);
-inline QString insertNewItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit, QString category);
+QString insertNewAddress(QSqlQuery qry, QString address);
+QString insertNewSupplier(QSqlQuery qry, QString supplierName, QString addressId = QString(), QString info = QString());
+QString insertNewItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit = QString(), QString category = QString());
 
 void emitSignalOnCompletion(QLineEdit *line);
 
-QString returnStringINN(QVariant sqlValue, QString ifNotNull, QString ifNull);
-
-QString stringAt(QCompleter *completer, int column);
+void appendErrorMessage(QString *orignalMessage, QString appendage, bool *error = nullptr);
+void throwErrorMessage(QString message, QString title = "Error");
+inline QString stringAt(QCompleter *completer, int column);
 
 #endif // CREATEDOCUMENT_H

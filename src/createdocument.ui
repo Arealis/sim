@@ -232,7 +232,7 @@
            <property name="layoutDirection">
             <enum>Qt::LeftToRight</enum>
            </property>
-           <layout class="QGridLayout" name="gridLayout">
+           <layout class="QGridLayout" name="detailsGrid">
             <property name="sizeConstraint">
              <enum>QLayout::SetDefaultConstraint</enum>
             </property>
@@ -263,7 +263,10 @@
                </sizepolicy>
               </property>
               <property name="text">
-               <string>Add Custom Value</string>
+               <string>Add Detail</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
               </property>
              </widget>
             </item>

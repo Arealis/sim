@@ -133,7 +133,6 @@ bool MainWindow::checkPrivelage(TableFlag table, User *user)
     //  (ie, defining bit flags for what these enums actually permit on a per table basis.).
     switch(table) {
     case PR: {
-        qDebug() << "User Privelage: " << user->privelage;
         if (user->privelage == Admin || user->privelage == InventoryManager || user->privelage == Mechanic)
             return true;
         break;
@@ -172,8 +171,9 @@ void MainWindow::prepareBaseTable()
 }
 MainWindow::~MainWindow()
 {
+    delete user;
+    delete headers;
     delete ui;
-    delete model;
 }
 
 void MainWindow::Login() //Login, edit data, basically the userdata manager.
@@ -217,9 +217,8 @@ void MainWindow::Login() //Login, edit data, basically the userdata manager.
 void MainWindow::createNewSIMDB()
 {
     simdb.open();
-    QSqlQuery q(simdb);
-    q.exec("PRAGMA foreign_keys = 1;");
-    q.exec("CREATE TABLE userdata ("
+    qry.exec("PRAGMA foreign_keys = 1;");
+    qry.exec("CREATE TABLE userdata ("
                 "id         INTEGER PRIMARY KEY "
                 ",user      TEXT UNIQUE NOT NULL "
                 ",pass      TEXT "
@@ -234,12 +233,79 @@ void MainWindow::createNewSIMDB()
      *  2 - Purchasing >> can create QR, POs
      *  3 - Inventory Manager >> can create PR, MR, RR
      *  4 - Admin >> has full access to everything */
-    q.exec("CREATE TABLE recurring_custom_details ("
+    qry.exec("CREATE TABLE addresses ("
+                "id         INTEGER PRIMARY KEY "
+                ",address   TEXT NOT NULL "
+            ");");
+    qry.exec("INSERT INTO addresses (address) VALUES ('Unknown Address');");
+    qry.exec("CREATE TABLE company ( "
+                "name                   TEXT "
+                ",info                  TEXT " //This is what shows up next to the logo on documents
+                ",shipping_address_id   INTEGER REFERENCES addresses (id) "
+                ",billing_address_id    INTEGER REFERENCES addresses (id) "
+            ");");
+    qry.exec("INSERT INTO company (name, info, shipping_address_id, billing_address_id) VALUES ('INSERT COMPANY NAME', 'INSERT COMPANY INFO', 1, 1);");
+    qry.exec("CREATE TABLE suppliers ( "
+                "id             INTEGER PRIMARY KEY "
+                ",name          TEXT NOT NULL "
+                ",info          TEXT "
+                ",address_id	INTEGER REFERENCES addresses (id) "
+            ");");
+    qry.exec("CREATE TABLE projects ( " //This can be vehicles, machines, tasks, etc.
+                "name       TEXT PRIMARY KEY " //Is is less confusing if project names are unique.
+                ",desc      TEXT " //If further information about the project is needed
+                ",isgroup   BOOL NOT NULL DEFAULT 0 " //Projects can also be groups of projects
+                ",model     TEXT "
+                ",serial    TEXT "
+                ",notes     TEXT " //For huge amounts of information about the project
+           ");");
+    qry.exec("CREATE TABLE project_groups ( "
+                "id         INTEGER PRIMARY KEY "
+                ",name      REFERENCES projects (name) ON UPDATE CASCADE "
+                ",project   REFERENCES projects (name) ON UPDATE CASCADE "
+            ");");
+    qry.exec("CREATE TABLE items ("
+                "id     INTEGER PRIMARY KEY "
+                ",num   TEXT "
+                ",desc  TEXT NOT NULL "
+                ",cat   TEXT NOT NULL DEFAULT 'Unknown' "
+                ",qty   REAL NOT NULL DEFAULT 0 "
+                ",unit  TEXT "  //Maybe this should be each by default
+                ",shelf TEXT "	//Location of item in storage
+                ",bin   TEXT "	//Location of item in storage
+           ");");
+           /*       A NOTE ABOUT UNITS AND CHILD ITEMS
+            * If the units are not like NULL, EACH or EA, special operations can be performed on the item.
+            * For example, if you buy a pack of 1000 screws, you may not want to always distribute all 1000
+            * of those screws at once, so you can break up the pack of 1000 screws into individual screws.
+            * A new item is created with the same item info, but has a different unit.
+            * Now you can distribute 50 screws, and still have 950 remaining. Since there are so many different
+            * types of units (there are 12 units in a dozen, but exactly how many units are in a box?),
+            * the user is meant to break these up themselves. This could be a security vulnerability. */
+    qry.exec("CREATE TABLE items_projects_linker ( "
+                "id         INTEGER PRIMARY KEY "
+                ",item_id   INTEGER REFERENCES items (id) ON UPDATE CASCADE "
+                ",project   TEXT REFERENCES projects (name) ON UPDATE CASCADE "
+            ");");
+    qry.exec("CREATE TABLE relatives ("
+                "id         INTEGER PRIMARY KEY "
+                ",original  INTEGER REFERENCES items (id) ON UPDATE CASCADE "
+                ",relative  INTEGER REFERENCES items (id) ON UPDATE CASCADE "
+            ");");
+           /*           NEED TO THINK ABOUT HOW RELATIVES WILL WORK A LITTLE MORE
+            * Explanation of relatives: Imagine a situation where a part for an old vehicle is no
+            * longer manufactured, but there happens to be a 3rd party who produces an exact replica
+            * of that part, but under a different part number. This is the exact situation siblings are
+            * for. It is not to link 5 different colors of rag together, it is used exclusively for when
+            * two different part numbers serve the exact same purpose, and for all intents and purposes,
+            * are the exact same. This is its own table because these cases are very rare. Children are
+            * also relatives. A whole family of items that do the exact same thing can be generated. */
+    qry.exec("CREATE TABLE recurring_custom_details ("
                 "id     INTEGER PRIMARY KEY "
                 ",tflag INTEGER NOT NULL "
                 ",name  TEXT NOT NULL "
             ");");
-    q.exec("CREATE TABLE custom_details ("
+    qry.exec("CREATE TABLE custom_details ("
                 "id     INTEGER PRIMARY KEY "
                 ",tflag INTEGER NOT NULL "
                 ",tnum  INTEGER NOT NULL "
@@ -247,7 +313,23 @@ void MainWindow::createNewSIMDB()
                 ",value TEXT "
                 ",flag  INTEGER DEFAULT 0 "
             ")");
-    /*                      CUSTOM FIELDS ARE A LITTLE STRANGE
+    qry.exec("CREATE TABLE custom_expenses ("
+                "id     INTEGER PRIMARY KEY "
+                ",tflag INTEGER NOT NULL "
+                ",tnum  INTEGER NOT NULL "
+                ",name  TEXT "
+                ",rate  REAL " //If the rate is 0, then the rate checkbox was not clicked
+                ",value REAL NOT NULL "
+            ");");
+    qry.exec("CREATE TABLE default_notes ("
+                "id     INTEGER PRIMARY KEY "
+                ",tflag INTEGER NOT NULL"
+                ",notes TEXT"
+            ");");
+    qry.exec("INSERT INTO default_notes (tflag, notes) VALUES "
+            "(0, 'PR Default'), (1, 'QR Default'), (2, 'PO Default'), (3, 'RR Default'), (4, 'MR Default')"
+            ";");
+    /*                      CUSTOM / DEFAULT FIELDS ARE A LITTLE STRANGE
      * A user can enter any number of custom fields. Qt will then generate
      * a custom field at an appropriate location within the appropriate table. Every time a new document
      * is created, it check recurring_custom_fields to see if that table has any recurring custom fields.
@@ -263,85 +345,10 @@ void MainWindow::createNewSIMDB()
      *  0 = Not Editable
      *  1 = Editable
      *  2 = Internal Detail [This is not implemented] */
-    q.exec("CREATE TABLE addresses ("
-                "id         INTEGER PRIMARY KEY "
-                ",address   TEXT NOT NULL "
-            ");");
-    q.exec("INSERT INTO addresses (address) VALUES ('Unknown Address');");
-    q.exec("CREATE TABLE company ( "
-                "name                   TEXT "
-                ",info                  TEXT " //This is what shows up next to the logo on documents
-                ",shipping_address_id   INTEGER REFERENCES addresses (id) "
-                ",billing_address_id    INTEGER REFERENCES addresses (id) "
-            ");");
-    q.exec("INSERT INTO company (name, info, shipping_address_id, billing_address_id) VALUES ('INSERT COMPANY NAME', 'INSERT COMPANY INFO', 1, 1);");
-    q.exec("CREATE TABLE suppliers ( "
-                "id             INTEGER PRIMARY KEY "
-                ",name          TEXT NOT NULL "
-                ",info          TEXT "
-                ",address_id	INTEGER REFERENCES addresses (id) "
-            ");");
-    q.exec("CREATE TABLE projects ( " //This can be vehicles, machines, tasks, etc.
-                "name       TEXT PRIMARY KEY " //Is is less confusing if project names are unique.
-                ",desc      TEXT " //If further information about the project is needed
-                ",isgroup   BOOL NOT NULL DEFAULT 0 " //Projects can also be groups of projects
-                ",model     TEXT "
-                ",serial    TEXT "
-                ",notes     TEXT " //For huge amounts of information about the project
-           ");");
-    q.exec("CREATE TABLE project_groups ( "
-                "id         INTEGER PRIMARY KEY "
-                ",name      REFERENCES projects (name) ON UPDATE CASCADE "
-                ",project   REFERENCES projects (name) ON UPDATE CASCADE "
-            ");");
-    q.exec("CREATE TABLE items ("
-                "id     INTEGER PRIMARY KEY "
-                ",num   TEXT NOT NULL "
-                ",desc  TEXT NOT NULL "
-                ",cat   TEXT NOT NULL DEFAULT 'unknown' "
-                ",qty   REAL NOT NULL DEFAULT 0 "
-                ",unit  TEXT "
-                ",shelf TEXT "	//Location of item in storage
-                ",bin   TEXT "	//Location of item in storage
-           ");");
-           /*       A NOTE ABOUT UNITS AND CHILD ITEMS
-            * If the units are not NULL, EACH or EA, special operations can be performed on the item.
-            * For example, if you buy a pack of 1000 screws, you may not want to always distribute all 1000
-            * of those screws at once, so you can break up the pack of 1000 screws into individual screws.
-            * A new item is created with the same item info, but has a different unit.
-            * Now you can distribute 50 screws, and still have 950 remaining. Since there are so many different
-            * types of units (there are 12 units in a dozen, but exactly how many units are in a box?),
-            * the user is meant to break these up themselves. This could be a security vulnerability. */
-    q.exec("CREATE TABLE relatives ("
-                "id         INTEGER PRIMARY KEY "
-                ",original  INTEGER REFERENCES items (id) ON UPDATE CASCADE "
-                ",relative  INTEGER REFERENCES items (id) ON UPDATE CASCADE "
-            ");");
-           /*           NEED TO THINK ABOUT HOW RELATIVES WILL WORK A LITTLE MORE
-            * Explanation of relatives: Imagine a situation where a part for an old vehicle is no
-            * longer manufactured, but there happens to be a 3rd party who produces an exact replica
-            * of that part, but under a different part number. This is the exact situation siblings are
-            * for. It is not to link 5 different colors of rag together, it is used exclusively for when
-            * two different part numbers serve the exact same purpose, and for all intents and purposes,
-            * are the exact same. This is its own table because these cases are very rare. Children are
-            * also relatives. A whole family of items that do the exact same thing can be generated. */
-    q.exec("CREATE TABLE items_projects_linker ( "
-                "id         INTEGER PRIMARY KEY "
-                ",item_id   INTEGER REFERENCES items (id) ON UPDATE CASCADE "
-                ",project   TEXT REFERENCES projects (name) ON UPDATE CASCADE "
-            ");");
-    q.exec("CREATE TABLE custom_expenses ("
-                "id     INTEGER PRIMARY KEY "
-                ",tflag INTEGER NOT NULL "
-                ",tnum  INTEGER NOT NULL "
-                ",name  TEXT "
-                ",rate  REAL " //If the rate is 0, then the rate checkbox was not clicked
-                ",value REAL NOT NULL "
-            ");");
-    q.exec("CREATE TABLE pr ( "
+    qry.exec("CREATE TABLE pr ( "
                 "num                            INTEGER PRIMARY KEY "
                 ",date                          DATE "
-                ",date_needed                   DATE /*The day by which this is needed. Enter ASAP if it's urgent.*/ "
+                ",date_needed                   DATE "
                 ",requested_by                  INTEGER NOT NULL REFERENCES userdata (id) "
                 ",project                       TEXT NOT NULL REFERENCES projects (name) ON UPDATE CASCADE /*The project this is needed for*/ "
                 ",discount_before_tax           BOOL DEFAULT 1 "
@@ -366,61 +373,74 @@ void MainWindow::createNewSIMDB()
      *      3 = Completed / Closed
      *      4 = Partially Completed (at least one rejected)
      *      5 = Completed (at least one rejected) */
-    q.exec("CREATE TABLE prd ( "
+    qry.exec("CREATE TABLE prd ( "
                 "id                     INTEGER PRIMARY KEY "
                 ",pr_num                INTEGER NOT NULL REFERENCES pr (num) ON UPDATE CASCADE "
                 ",item_id               INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
-                ",supplier_id           INTEGER REFERENCES suppliers (id) /*The suggested supplier*/ "
                 ",qty                   REAL NOT NULL "
+                ",supplier_id           INTEGER REFERENCES suppliers (id) /*The suggested supplier*/ "
                 ",expected_unit_price   REAL "
                 ",taxable               BOOLEAN "
                 ",total                 REAL "
-                ",status                INTEGER NOT NULL DEFAULT 1 /*0=closed,1=open,2=rejected*/ "
+                ",status                INTEGER NOT NULL DEFAULT 0 /*0=draft,1=open,2=QRSent,3=Ordered,4=Rejected,5=NotAvailable*/ "
             ");");
-    q.exec("CREATE TABLE qr ( "
-                "num            INTEGER PRIMARY KEY "
-                ",date          DATE "
-                ",supplier_id   INTEGER NOT NULL REFERENCES supplier (id) "
-                ",requested_by  INTEGER NOT NULL REFERENCES userdata (id) "
-                ",notes         TEXT "
-                ",status        INTEGER NOT NULL DEFAULT 2 /*0=Closed,1=Items-Missing,2=Open*/ "
-            ");");
-    q.exec("CREATE TABLE qrd ( "
-                "id         INTEGER PRIMARY KEY "
-                ",qr_num    INTEGER NOT NULL REFERENCES qr (num) "
-                ",item_id   INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
-                ",unit      TEXT "
-                ",qty       REAL NOT NULL "
-                ""
-            ");");
-    q.exec("CREATE TABLE po ( "
+    qry.exec("CREATE TABLE qr ( "
                 "num                    INTEGER PRIMARY KEY "
-                ",invoice_num           INTEGER "
                 ",date                  DATE "
-                ",supplier_id           INTEGER REFERENCES suppliers (id) NOT NULL "
-                ",supplier_address_id   INTEGER REFERENCES addresses (id) "
+                ",date_needed           DATE "
+                ",supplier_id           INTEGER NOT NULL REFERENCES supplier (id) "
+                ",supplier_address_id   INTEGER NOT NULL REFERENCES addresses (id) "
+                ",requested_by          INTEGER NOT NULL REFERENCES userdata (id) "
                 ",shipping_address_id   INTEGER REFERENCES addresses (id) "
                 ",billing_address_id    INTEGER REFERENCES addresses (id) "
-                ",shipper               TEXT "
-                ",authorized_by         INTEGER REFERENCES userdata (id) "
-                ",subtotal              REAL " // sum of prices from pod
-                ",taxable_subtotal      REAL " // sum of prices from pod where taxable = 1
-                ",discount_rate         REAL "
-                ",discount              REAL DEFAULT 0 "
-                ",tax_rate              REAL " // Percentage tax
-                ",tax                   REAL " // Amount tax
-                ",shipping              REAL " // shipping & handling AKA freight
-                ",other                 REAL " // Any uncategorized expenses. May be better to do a custom table here.
-                ",total                 REAL " // subtotal + tax + shipping + other - discount
-                ",notes                 TEXT " //Any additional information or instructions
-                ",status                INTEGER NOT NULL DEFAULT 3 " // See below for status info
+                ",notes                 TEXT "
+                ",status                INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=open, 2=Closed (Quote Received)*/ "
+            ");");
+    qry.exec("CREATE TABLE qrd ( "
+                "id         INTEGER PRIMARY KEY "
+                ",qr_num    INTEGER NOT NULL REFERENCES qr (num) "
+                ",prd_id    INTEGER REFERENCES prd (id) "
+                ",item_id   INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
+                ",qty       REAL NOT NULL "
+                ",notes     TEXT "
+                ",status    INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=Open, 2=Quoted, 3=NotAvailable*/"
+            ");");
+    qry.exec("CREATE TABLE po ( "
+                "num                            INTEGER PRIMARY KEY "
+                ",invoice_num                   INTEGER "
+                ",authorized_by                 INTEGER REFERENCES userdata (id) "
+                ",date                          DATE "
+                ",date_expected                 DATE "
+                ",supplier_id                   INTEGER REFERENCES suppliers (id) NOT NULL "
+                ",supplier_address_id           INTEGER REFERENCES addresses (id) "
+                ",shipping_address_id           INTEGER REFERENCES addresses (id) "
+                ",billing_address_id            INTEGER REFERENCES addresses (id) "
+                ",discount_before_tax           BOOL DEFAULT 1 "
+                ",taxable_subtotal              REAL " // This is just for storage. Whenever a document is
+                ",tax_exempt_subtotal           REAL " // opened this will be calculated on the fly
+                ",discount_on_taxable_rate      REAL "
+                ",discount_on_taxable           REAL "
+                ",discount_on_tax_exempt_rate   REAL "
+                ",discount_on_tax_exempt        REAL "
+                ",discount_after_tax_rate       REAL "
+                ",discount_after_tax            REAL "
+                ",tax_rate                      REAL "
+                ",tax                           REAL "
+                ",total                         REAL "
+                ",notes                         TEXT " //Any additional information or instructions
+                ",status                        INTEGER NOT NULL DEFAULT 0 " // See below for status info
            ");");
             /*              status FLAGS ARE AS FOLLOWS
-             * 0 = PO Closed. Ideally, items from PO have been received, verified.
-             * 1 = PO Partially Received. Only some of the items from the PO have been received.
-             * 2 = PO Items have shipped, but none received. This is useful to note because of some vendor's FOB shipping policy.
-             * 3 = PO sent but items have not been received. */
-    q.exec("CREATE TABLE pod (" //POD stand for purchase order details
+             * 0 = Draft................ The PO is still a draft.
+             * 1 = Sent................. The PO has been sent out but the vendor has not accepted it yet.
+             * 2 = Open................. The vendor has accepted the PO but it is not known whether the items have shipped yet.
+             * 3 = Shipped.............. Items have been shipped, but none have been received. This is useful to note because of some vendor's FOB shipping policy.
+             * 4 = Partially Received... Only some of the items from the PO have been been received.
+             * 5 = Closed............... All items from the PO have been received.
+             * 6 = Rejected............. The PO was not accepted by the vendor for some reason.
+             * 7 = Forced Closed........ The PO was closed without all items being received. This may be useful in cases where the company has to cut their losses with a vendor.
+             */
+    qry.exec("CREATE TABLE pod (" //POD stand for purchase order details
                 "id             INTEGER PRIMARY KEY "
                 ",po_num        INTEGER REFERENCES po (num) ON UPDATE CASCADE "
                 ",pr_num        INTEGER REFERENCES pr (num) " //This is to internally update items in the PR as they are completed
@@ -432,52 +452,53 @@ void MainWindow::createNewSIMDB()
                 ",discount      REAL " // Amount
                 ",taxable       BOOL NOT NULL DEFAULT 1 " //Can tax be applied to this item?
                 ",price         REAL NOT NULL " //qty * unit_price - discount
-                ",status        INTEGER NOT NULL DEFAULT 2 " // See below for status info
+                ",status        INTEGER NOT NULL DEFAULT 0 " // See below for status info
                 ",condition     TEXT " // This is a mirror of the condition in receiving report details
             ");");
             /*              POD status FLAGS
-             *  0 = correct quantity received
+             *  0 = none received
              *  1 = partial quantity received
-             *  2 = none received
+             *  2 = correct quantity received
              *  3 = too much received */
-    q.exec("CREATE TABLE rr (" //rr - Receiving Report
-                "num            INTEGER PRIMARY KEY "
-                ",date          DATE NOT NULL " //Date collected
-                ",date_arrived  DATE NOT NULL "
-                ",shipped_by    TEXT NOT NULL "
-                ",delivered_by  TEXT NOT NULL "
-                ",inspected_by  TEXT REFERENCES userdata (id) "
-                ",fob           TEXT "
-                ",po_num        INTEGER REFERENCES po (num) " //There may be no PO# in certain cases
-                ",invoice_num   INTEGER REFERENCES po (invoice_num) "
-                ",supplier_id   INTEGER REFERENCES suppliers (id) "
-                ",comments      TEXT "
+    qry.exec("CREATE TABLE rr (" //rr - Receiving Report
+                "num                    INTEGER PRIMARY KEY "
+                ",date                  DATE NOT NULL " //Date collected
+                ",date_arrived          DATE NOT NULL "
+                ",delivered_by          TEXT NOT NULL "
+                ",inspected_by          INTEGER REFERENCES userdata (id) "
+                ",supplier_address_id   INTEGER REFERENCES addresses (id) "
+                ",po_num                INTEGER REFERENCES po (num) " //There may be no PO# in certain cases
+                ",invoice_num           INTEGER REFERENCES po (invoice_num) "
+                ",supplier_id           INTEGER REFERENCES suppliers (id) "
+                ",notes                 TEXT "
+                ",status                INTEGER NOT NULL DEFAULT 0 "
             ");");
-    q.exec("CREATE TABLE rrd ("
+    qry.exec("CREATE TABLE rrd ("
                 "id             INTEGER PRIMARY KEY "
                 ",rr_num        INTEGER NOT NULL REFERENCES rr (num) ON UPDATE CASCADE "
                 ",item_id       INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty           REAL NOT NULL " //This has to be checked against the PO
                 ",unit          TEXT "
                 ",condition     TEXT NOT NULL REFERENCES conditions (name) "
-                ",comments      TEXT "
+                ",notes         TEXT "
             ");");
-    q.exec("CREATE TABLE mr ("
-                "num            INTEGER PRIMARY KEY "
-                ",date          DATE NOT NULL "
-                ",requested_by  TEXT NOT NULL "
-                ",authorized_by INTEGER REFERENCES userdata (id) "
-                ",collected_by  TEXT NOT NULL "
-                ",issued_by     INTEGER REFERENCES userdata (id) "
-                ",project       INTEGER REFERENCES projects (name) ON UPDATE CASCADE "
-                ",comments      TEXT "
+    qry.exec("CREATE TABLE mr ("
+                "num                INTEGER PRIMARY KEY "
+                ",project           INTEGER REFERENCES projects (name) ON UPDATE CASCADE "
+                ",date_requested    DATE NOT NULL "
+                ",requested_by      TEXT NOT NULL "
+                ",date_authorized   DATE "
+                ",authorized_by     INTEGER REFERENCES userdata (id) "
+                ",date_issued       DATE "
+                ",issued_by         INTEGER REFERENCES userdata (id) "
+                ",collected_by      TEXT "
+                ",notes             TEXT "
             ");");
-    q.exec("CREATE TABLE mrd ( "
+    qry.exec("CREATE TABLE mrd ( "
                 "id         INTEGER PRIMARY KEY "
                 ",mr_num    INTEGER NOT NULL REFERENCES mr (num) ON UPDATE CASCADE "
                 ",item_id   INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty       REAL NOT NULL "
-                ",unit      TEXT REFERENCES items (unit) "
             ");");
     /*                                  A WORD ABOUT DRAFTS
      *  Drafts will inhabit the bottom few numbers of POs, so if POs begin from 1001, drafts span the numbers
@@ -488,7 +509,7 @@ void MainWindow::createNewSIMDB()
     simdb.close();
 }
 
-void MainWindow::getHeaders() {
+void MainWindow::getHeaders() { //This function pulls the column (header) names from the QSqlQueryModel and inserts them into the headers QStringList in order
     headers->clear();
     ui->SearchForDropdown->clear();
     QString header;
@@ -529,9 +550,8 @@ inline void MainWindow::setHiddenColumns(Headers ... columnHeaders)
  *      4:  hide the appropriate columns and fill out the search for comboBox
  */
 
-void MainWindow::displayTable(TableFlag tableFlag, QString title, QSqlDatabase database, QString query)
+void MainWindow::displayTable(QString title, QSqlDatabase database, QString query)
 {
-    currentTable = tableFlag;
     ui->tableLabel->setText(title);
     ui->SearchBox->clear();
 
@@ -551,7 +571,7 @@ void MainWindow::displayTable(TableFlag tableFlag, QString title, QSqlDatabase d
     getHeaders();
     ui->table->update();
 
-    qDebug() << static_cast<TableFlag>(currentTable) << qry.lastError();
+    qDebug() << title << qry.lastError();
 }
 
 /*  TODO: Additional functions needed:
@@ -560,35 +580,67 @@ void MainWindow::displayTable(TableFlag tableFlag, QString title, QSqlDatabase d
  *          setDateRange()
  */
 
+void MainWindow::on_SearchBox_returnPressed()
+{
+    if (!ui->SearchBox->text().isEmpty()) {
+        //This query is dangerous, because the searchTerm is not escaped
+        QString newQuery = "SELECT * FROM ("%query.chopped(1)%") WHERE `"%ui->SearchForDropdown->currentText()%"` LIKE "%escapeSql("%"%ui->SearchBox->text()%"%")%";";
+        simdb.open();
+        qry.exec(newQuery);
+        model->setQuery(qry);
+        while (model->canFetchMore()) {model->fetchMore();}
+        simdb.close();
+    } else {
+        refresh();
+    }
+}
+
+void MainWindow::refresh()
+{
+    simdb.open();
+    qry.exec(query);
+    model->setQuery(qry);
+    while (model->canFetchMore()) { model->fetchMore(); }
+    simdb.close();
+    ui->table->update();
+}
+
 void MainWindow::on_actionItem_History_triggered() //Every transaction in the Inventory
 {
-    query = "SELECT prd.supplier_id, pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document Type', prd.pr_num AS 'Doc#', userdata.name As 'Created by' , prd.unit AS 'Unit'"
-    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', pr.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
+    query = "SELECT prd.supplier_id, pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document', prd.pr_num AS 'Doc#', userdata.name As 'Created by' "
+    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Quoted', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', pr.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
     "FROM prd "
     "LEFT JOIN pr ON prd.pr_num = pr.num "
     "LEFT JOIN suppliers ON suppliers.id = prd.supplier_id "
     "LEFT JOIN userdata ON userdata.id = pr.requested_by "
     "UNION "
-    // TODO: Don't forget to include QRs here later
-    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, pod.unit, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
+    "SELECT qr.supplier_id, qr.requested_by, qr.date, 'Request for Quotation', qr.num, userdata.name, NULL , qrd.qty, NULL, suppliers.name, qrd_pr.project, NULL, NULL "
+    "FROM qrd "
+    "LEFT JOIN qr ON qrd.qr_num = qr.num "
+    "LEFT JOIN suppliers ON suppliers.id = qr.supplier_id "
+    "LEFT JOIN userdata ON userdata.id = qr.requested_by "
+    "LEFT JOIN prd AS 'qrd_prd' ON qrd_prd.id = qrd.prd_id "
+    "LEFT JOIN pr AS 'qrd_pr' ON qrd_pr.num = qrd_prd.pr_num "
+    "UNION "
+    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, NULL, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
     "FROM pod "
     "LEFT JOIN po ON pod.po_num = po.num "
     "LEFT JOIN suppliers ON suppliers.id = po.supplier_id "
     "LEFT JOIN userdata ON userdata.id = po.authorized_by "
     "UNION "
-    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, rrd.unit, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
+    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, NULL, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
     "FROM rrd "
     "LEFT JOIN rr ON rrd.rr_num = rr.num "
     "LEFT JOIN suppliers ON suppliers.id = rr.supplier_id "
     "LEFT JOIN userdata ON userdata.id = rr.inspected_by "
     "UNION "
-    "SELECT NULL, mr.authorized_by, mr.date, 'Material Requisition', mrd.mr_num, userdata.name, mrd.unit, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
+    "SELECT NULL, mr.authorized_by, mr.date_authorized, 'Material Requisition', mrd.mr_num, userdata.name, NULL, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
     "FROM mrd "
     "LEFT JOIN mr ON mrd.mr_num = mr.num "
     "LEFT JOIN userdata ON userdata.id = mr.authorized_by "
     ";";
 
-    displayTable(InventoryHistory, "Inventory Movement History", simdb, query);
+    displayTable("Inventory Movement History", simdb, query);
 
     setHiddenColumns("supplier_id", "requested_by");
 }
@@ -602,37 +654,45 @@ void MainWindow::on_actionItems_Table_Default_triggered()
             "GROUP BY i.id "
             "ORDER BY i.id DESC;";
 
-    displayTable(Items, "Items", simdb, query);
+    displayTable("Items", simdb, query);
 
     setHiddenColumns("item_id");
 }
 
 void MainWindow::createItem_Details_Table(QString itemId)
 {
-    query = QString("SELECT prd.supplier_id, pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document Type', pr.num AS 'Doc#', userdata.name As 'Created by' /*,items.unit AS 'Unit'*/"
-    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', pr.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
+    query = QString("SELECT prd.supplier_id, pr.requested_by, pr.date AS 'Date', 'Purchase Requisition' AS 'Document', pr.num AS 'Doc#', userdata.name As 'Created by' "
+    ",prd.qty AS 'Qty Reqd.', NULL AS 'Qty Quoted', NULL AS 'Qty Ordered', suppliers.name AS 'Supplier', pr.project AS 'Project', NULL AS 'Qty In', NULL AS 'Qty Out' "
     "FROM prd "
     "LEFT JOIN pr ON prd.pr_num = pr.num "
     "LEFT JOIN suppliers ON suppliers.id = prd.supplier_id "
     "LEFT JOIN userdata ON userdata.id = pr.requested_by "
     "WHERE prd.item_id = %1 "
     "UNION "
-    //QR goes here
-    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name /*,items.unit*/, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
+    "SELECT qr.supplier_id, qr.requested_by, qr.date, 'Request for Quotation', qr.num, userdata.name, NULL , qrd.qty, NULL, suppliers.name, qrd_pr.project, NULL, NULL "
+    "FROM qrd "
+    "LEFT JOIN qr ON qrd.qr_num = qr.num "
+    "LEFT JOIN suppliers ON suppliers.id = qr.supplier_id "
+    "LEFT JOIN userdata ON userdata.id = qr.requested_by "
+    "LEFT JOIN prd AS 'qrd_prd' ON qrd_prd.id = qrd.prd_id "
+    "LEFT JOIN pr AS 'qrd_pr' ON qrd_pr.num = qrd_prd.pr_num "
+    "WHERE qrd.item_id = %1 "
+    "UNION "
+    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, NULL, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
     "FROM pod "
     "LEFT JOIN po ON pod.po_num = po.num "
     "LEFT JOIN suppliers ON suppliers.id = po.supplier_id "
     "LEFT JOIN userdata ON userdata.id = po.authorized_by "
     "WHERE pod.item_id = %1 "
     "UNION "
-    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name /*,items.unit*/, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
+    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, NULL, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
     "FROM rrd "
     "LEFT JOIN rr ON rrd.rr_num = rr.num "
     "LEFT JOIN suppliers ON suppliers.id = rr.supplier_id "
     "LEFT JOIN userdata ON userdata.id = rr.inspected_by "
     "WHERE rrd.item_id = %1 "
     "UNION "
-    "SELECT NULL, mr.authorized_by, mr.date, 'Material Requisition', mrd.mr_num, userdata.name /*,items.unit*/, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
+    "SELECT NULL, mr.authorized_by, mr.date, 'Material Requisition', mrd.mr_num, userdata.name, NULL, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
     "FROM mrd "
     "LEFT JOIN mr ON mrd.mr_num = mr.num "
     "LEFT JOIN userdata ON userdata.id = mr.authorized_by "
@@ -648,7 +708,7 @@ void MainWindow::createItem_Details_Table(QString itemId)
     QString itemName = qry.value(0).toString();
     QString itemDesc = qry.value(1).toString();
 
-    displayTable(ItemDetails, "Movement History For "%itemName%" || "%itemDesc, simdb, query);
+    displayTable("Movement History For "%itemName%" || "%itemDesc, simdb, query);
     qDebug() << qry.lastError();
 
     setHiddenColumns("supplier_id", "requested_by");
@@ -658,12 +718,12 @@ void MainWindow::on_actionProjects_triggered()
 {
     query = "SELECT name AS 'Project', isgroup AS 'Group?', model as 'Model#', serial as 'Serial#', notes AS 'Notes' FROM projects;";
 
-    displayTable(Projects, "Projects", simdb, query);
+    displayTable("Projects", simdb, query);
 }
 
 void MainWindow::createProject_Details_Table(QString project)
 {
-    query = QString("SELECT prd.item_id, prd.supplier_id, pr.requested_by, userdata.name AS 'Creator', pr.date, 'PR' AS 'Doc', pr.num AS '#', items.num AS 'Item ID'"
+    query = QString("SELECT prd.item_id, prd.supplier_id, pr.requested_by, userdata.name AS 'Creator', pr.date AS 'Date', 'PR' AS 'Doc', pr.num AS 'Doc#', items.num AS 'Item ID'"
         ", items.desc AS 'Description', items.unit AS 'Unit', prd.qty AS 'Qty Reqd.', NULL AS 'Qty Dist.', suppliers.name AS 'Supplier' "
         "FROM prd "
         "LEFT JOIN pr ON pr.num = prd.pr_num "
@@ -680,23 +740,23 @@ void MainWindow::createProject_Details_Table(QString project)
         "WHERE mr.project = '%1' "
         ";").arg(project);
 
-    displayTable(ProjectDetails, project%" History", simdb, query);
+    displayTable(project%" History", simdb, query);
 
     setHiddenColumns("item_id", "supplier_id", "requested_by");
 }
 
 void MainWindow::on_actionSuppliers_triggered()
 {
-    query = "SELECT id, name AS 'Supplier' FROM suppliers;";
+    query = "SELECT id AS 'supplier_id', name AS 'Supplier' FROM suppliers;";
 
-    displayTable(Suppliers, "Suppliers", simdb, query);
+    displayTable("Suppliers", simdb, query);
 
-    setHiddenColumns("id");
+    setHiddenColumns("supplier_id");
 }
 
 void MainWindow::createSuppliers_Details_Table(QString supplierId)
 {
-    query = QString("SELECT prd.item_id, pr.requested_by, pr.date AS 'Date', userdata.name AS 'Creator', 'PR' AS 'Doc', prd.pr_num AS '#', pr.project AS 'Project', items.num AS 'Item ID' "
+    query = QString("SELECT prd.item_id, pr.requested_by, pr.date AS 'Date', userdata.name AS 'Creator', 'PR' AS 'Doc', prd.pr_num AS 'Doc#', pr.project AS 'Project', items.num AS 'Item ID' "
         ", items.desc AS 'Description' , items.unit AS 'Unit', prd.qty AS 'Qty Reqd.', NULL AS 'Qty Ordered', NULL AS 'Qty Recd.', NULL As 'Unit Price', NULL AS 'Total' "
         "FROM prd "
         "LEFT JOIN pr ON pr.num = prd.pr_num "
@@ -709,7 +769,7 @@ void MainWindow::createSuppliers_Details_Table(QString supplierId)
         "LEFT JOIN po ON po.num = pod.po_num "
         "LEFT JOIN items ON items.id = pod.item_id "
         "LEFT JOIN userdata ON userdata.id = po.authorized_by "
-        "WHERE po.supplier_id = '%1' "
+        "WHERE po.supplier_id = %1 "
         "UNION "
         "SELECT rrd.item_id, rr.inspected_by, rr.date, userdata.name, 'RR', rrd.rr_num, NULL, items.num, items.desc, items.unit, NULL, NULL, rrd.qty "
         ", (SELECT pod.unit_price WHERE pod.item_id = rrd.item_id), (SELECT pod.unit_price WHERE pod.item_id = rrd.item_id) * rrd.qty "
@@ -718,7 +778,7 @@ void MainWindow::createSuppliers_Details_Table(QString supplierId)
         "LEFT JOIN items ON items.id = rrd.item_id "
         "LEFT JOIN userdata ON userdata.id = rr.inspected_by "
         "LEFT JOIN pod ON pod.po_num = rr.po_num "
-        "WHERE rr.supplier_id = '%1' "
+        "WHERE rr.supplier_id = %1 "
         ";").arg(supplierId);
 
     simdb.open();
@@ -727,7 +787,7 @@ void MainWindow::createSuppliers_Details_Table(QString supplierId)
     simdb.close();
     QString supplierName = qry.value(0).toString();
 
-    displayTable(SupplierDetails, "Transactions Involving "%supplierName, simdb, query);
+    displayTable("Transactions Involving "%supplierName, simdb, query);
 
     setHiddenColumns("item_id", "requested_by");
 }
@@ -735,7 +795,7 @@ void MainWindow::createSuppliers_Details_Table(QString supplierId)
 void MainWindow::on_actionPurchase_Requisitions_triggered()
 {
     query = "SELECT pr.requested_by, userdata.name AS 'Requested By', pr.date AS 'Date Created', pr.date_needed AS 'Date Needed', pr.num AS 'PR#' "
-        ",group_concat(DISTINCT pr.project) AS 'Project(s)', group_concat(DISTINCT suppliers.name) AS 'Recommended Supplier(s)' "
+        ",pr.project AS 'Project', group_concat(DISTINCT suppliers.id) AS 'supplier_id', group_concat(DISTINCT suppliers.name) AS 'Recommended Supplier(s)' "
         ",CASE pr.status "
             "WHEN 0 THEN 'Draft' "
             "WHEN 1 THEN 'Closed '"
@@ -743,7 +803,7 @@ void MainWindow::on_actionPurchase_Requisitions_triggered()
             "WHEN 3 THEN 'Open' "
             "WHEN 4 THEN 'Partial (Item(s) Rejected)' "
             "WHEN 5 THEN 'Closed (Item(s) Rejected)' "
-        "END as 'Status' "
+        "END AS 'Status' "
         "FROM pr "
         "LEFT JOIN prd ON prd.pr_num = pr.num "
         "LEFT JOIN userdata ON pr.requested_by = userdata.id "
@@ -752,7 +812,7 @@ void MainWindow::on_actionPurchase_Requisitions_triggered()
         "ORDER BY pr.num DESC "
     ";";
 
-    displayTable(PR, "Purchase Requisitions", simdb, query);
+    displayTable("Purchase Requisitions", simdb, query);
 
     setHiddenColumns("requested_by");
 }
@@ -760,16 +820,45 @@ void MainWindow::on_actionPurchase_Requisitions_triggered()
 void MainWindow::createPR_Details(QString prnum)
 {
     query = "SELECT prd.supplier_id, prd.item_id, suppliers.name AS 'Supplier', items.num AS 'Item ID' , items.desc AS 'Description'"
-        ", items.cat AS 'Category', prd.qty AS 'Quantity', items.unit AS 'Unit', printf('%.2f', prd.expected_unit_price) AS 'Expected Price',  prd.total AS 'Total' "
+        ",items.cat AS 'Category', prd.qty AS 'Quantity', items.unit AS 'Unit', printf('%.2f', prd.expected_unit_price) AS 'Expected Price',  prd.total AS 'Total' "
         "FROM prd "
         "LEFT JOIN suppliers ON prd.supplier_id = suppliers.id "
         "LEFT JOIN items ON prd.item_id = items.id "
         "WHERE prd.pr_num = "%prnum%";";
 
-    displayTable(PRD, "Purchase Requisition #"%prnum, simdb, query);
+    displayTable("Purchase Requisition #"%prnum, simdb, query);
 
     setHiddenColumns("supplier_id", "item_id");
 }
+
+void MainWindow::on_actionQuotation_Requests_triggered()
+{
+    query = "SELECT qr.requested_by, userdata.name AS 'Requested By', qr.date AS 'Date Created', qr.date_needed AS 'Date Needed', qr.num AS 'QR#' "
+        ",qr.supplier_id, suppliers.name AS 'Supplier', qr.status AS 'Status' "
+        "FROM qr "
+        "LEFT JOIN userdata ON qr.requested_by = userdata.id "
+        "LEFT JOIN suppliers ON qr.supplier_id = suppliers.id "
+    ";";
+
+    displayTable("Requests for Quotation", simdb, query);
+
+    setHiddenColumns("requested_by", "supplier_id");
+}
+
+void MainWindow::createQR_Details(QString qrnum)
+{
+    query = "SELECT qrd.prd_id AS 'PR#', prd.project AS 'Needed For', prd.item_id, items.num AS 'Item ID', items.desc AS 'Description', items.cat AS 'Category', items.unit AS 'Unit' "
+        ",qrd.qty AS 'Quantity', qrd.status AS 'Status', qrd.notes AS 'Notes' "
+        "FROM qrd "
+        "LEFT JOIN items ON items.id = qrd.item_id "
+        "LEFT JOIN prd ON prd.id = qrd.prd_id "
+        "WHERE qrd.qr_num = "%qrnum%";";
+
+    displayTable("Request for Quotation #"%qrnum, simdb, query);
+
+    setHiddenColumns("item_id");
+}
+
 
 void MainWindow::on_actionPurchase_Orders_triggered()
 {
@@ -787,7 +876,7 @@ void MainWindow::on_actionPurchase_Orders_triggered()
         "LEFT JOIN suppliers ON suppliers.id = po.supplier_id "
     ";";
 
-    displayTable(PO, "Purchase Orders", simdb, query);
+    displayTable("Purchase Orders", simdb, query);
 
     setHiddenColumns("authorized_by", "supplier_id");
 }
@@ -796,7 +885,7 @@ void MainWindow::createPOD_Table(QString ponum)
 {
     query = "SELECT po.date, suppliers.name FROM po JOIN suppliers ON suppliers.id = po.supplier_id WHERE po.num = "%ponum%";";
 
-    displayTable(POD, "Purchase Order #"%ponum, simdb, query);
+    displayTable("Purchase Order #"%ponum, simdb, query);
 }
 
 void MainWindow::on_actionReceived_triggered()
@@ -814,7 +903,7 @@ void MainWindow::on_actionReceived_triggered()
         "LEFT JOIN userdata ON userdata.name = rr.inspected_by"
         ";";
 
-    displayTable(RR, "Receiving Reports", simdb, query);
+    displayTable("Receiving Reports", simdb, query);
 }
 
 void MainWindow::createReceived_Details_Table(QString rrnum)
@@ -830,9 +919,7 @@ void MainWindow::createReceived_Details_Table(QString rrnum)
         "LEFT JOIN items ON items.item_id = trans.item_id "
         "LEFT JOIN projects ON projects.project_id = trans.used_for ";
 
-    displayTable(RRD, "Receiving Report #"%rrnum, simdb, query);
-
-
+    displayTable("Receiving Report #"%rrnum, simdb, query);
 }
 
 void MainWindow::on_actionRequested_Items_triggered()
@@ -847,7 +934,7 @@ void MainWindow::on_actionRequested_Items_triggered()
         "ORDER BY mr.num "
         ";";
 
-    displayTable(MR, "Material Requisitions", simdb, query);
+    displayTable("Material Requisitions", simdb, query);
 }
 
 void MainWindow::createRequested_Details_Table(QString mrnum)
@@ -859,12 +946,13 @@ void MainWindow::createRequested_Details_Table(QString mrnum)
         "LEFT JOIN items ON items.item_id = trans.item_id "
         "LEFT JOIN projects ON projects.project_id = trans.used_for ";
 
-    displayTable(MRD, "Material Requisition #"%mrnum, simdb, query);
+    displayTable("Material Requisition #"%mrnum, simdb, query);
 }
 
 void MainWindow::on_SearchForDropdown_currentIndexChanged(int index)
 {
-    on_SearchBox_returnPressed();
+    if (!ui->SearchBox->text().isEmpty())
+        on_SearchBox_returnPressed();
 }
 
 void MainWindow::goToHome()
@@ -887,30 +975,35 @@ void MainWindow::goToHome()
     */
 }
 
+inline QString MainWindow::siblingAtHeader(const QModelIndex &index, QString headerName) //returns the index of the sibling column that has the specified header string
+{
+    //Just a convenience function so I don't have to type this out every time
+    return index.siblingAtColumn(headers->indexOf(headerName)).data().toString();
+}
 
 void MainWindow::on_table_doubleClicked(const QModelIndex &index)
 {
     // First:   Identify the column flag
     // Second:  If necessary, identify any special tables that would require a different columnFlag
-    QString columnName = headers->takeAt(index.column());
+    QString columnName = headers->at(index.column());
     switch(columnFlagsMap.at(columnName)) {
     case ColumnFlags::ItemId:
     case ColumnFlags::ItemNum:
     case ColumnFlags::ItemUnit:
     case ColumnFlags::ItemDesc: {
-        createItem_Details_Table(index.siblingAtColumn(headers->indexOf("item_id")).data().toString());
+        createItem_Details_Table(siblingAtHeader(index, "item_id"));
         break;
     }
     case ColumnFlags::SupplierId:
     case ColumnFlags::SupplierName: {
-        createSuppliers_Details_Table(index.siblingAtColumn(headers->indexOf("supplier_id")).data().toString());
+        createSuppliers_Details_Table(siblingAtHeader(index, "supplier_id"));
         break;
     }
     case ColumnFlags::Project: {
         if (headers->indexOf("Project") < 0)
-            createProject_Details_Table(index.siblingAtColumn(headers->indexOf("Used For")).data().toString());
+            createProject_Details_Table(siblingAtHeader(index, "Used For"));
         else
-            createProject_Details_Table(index.siblingAtColumn(headers->indexOf("Project")).data().toString());
+            createProject_Details_Table(siblingAtHeader(index, "Project"));
         break;
     }
     case ColumnFlags::ItemCat: {
@@ -925,22 +1018,61 @@ void MainWindow::on_table_doubleClicked(const QModelIndex &index)
     }
     case ColumnFlags::DocNum:
     case ColumnFlags::DocType: {
-        //Not sure what should be done here. I get the feeling I should show the details of the particular document.
-        //Should implement this before production
+        switch(tableFlagsMap.at(siblingAtHeader(index, headers->contains("Document") ? "Document" : "Doc"))) {
+        case PR: {
+            if (siblingAtHeader(index, "Doc#").toInt() < 10000)
+                CreateDocument doc(PR, siblingAtHeader(index, "Doc#"), user, "sim", this);
+            else
+                createPR_Details(siblingAtHeader(index, "Doc#"));
+            break;
+        }
+        case QR: {
+            if (siblingAtHeader(index, "Doc#").toInt() < 10000)
+                CreateDocument doc(QR, siblingAtHeader(index, "Doc#"), user, "sim", this);
+            else
+                createQR_Details(siblingAtHeader(index, "Doc#"));
+            break;
+        }
+        case PO: {
+            if (siblingAtHeader(index, "Doc#").toInt() < 10000)
+                CreateDocument doc(PO, siblingAtHeader(index, "Doc#"), user, "sim", this);
+            else
+                createPOD_Table(siblingAtHeader(index, "Doc#"));
+            break;
+        }
+        case RR: {
+            if (siblingAtHeader(index, "Doc#").toInt() < 10000)
+                CreateDocument doc(RR, siblingAtHeader(index, "Doc#"), user, "sim", this);
+            else
+                createReceived_Details_Table(siblingAtHeader(index, "Doc#"));
+            break;
+        }
+        case MR: {
+            if (siblingAtHeader(index, "Doc#").toInt() < 10000)
+                CreateDocument doc(MR, siblingAtHeader(index, "Doc#"), user, "sim", this);
+            else
+                createRequested_Details_Table(siblingAtHeader(index, "Doc#"));
+            break;
+        }
+        default:
+            qDebug() << "The document type could not be inferred.";
+            break;
+        }
         break;
     }
     //If I can get docnum and doctype workin right, I should be able to get rid of these 5 extra cases (and their enums)
     case ColumnFlags::PRNum : {
-        if (index.siblingAtColumn(headers->indexOf("Status")).data().toString() == "Draft")
-        {
+        if (siblingAtHeader(index, "Status") == "Draft")
             CreateDocument doc(PR, index.data().toString(), user, "sim", this);
-        } else
+        else
             createPR_Details(index.data().toString());
         break;
     }
     case ColumnFlags::QRNum: {
-        //This function doesn't exist yet
-        //createQR_Details(index.data().toString());
+        if (siblingAtHeader(index, "Status") == "0")
+            CreateDocument doc(QR, index.data().toString(), user, "sim", this);
+        else
+            createQR_Details(index.data().toString());
         break;
     }
     case ColumnFlags::PONum: {
@@ -1056,6 +1188,9 @@ void MainWindow::on_actionPrint_Current_Table_triggered()
 
 void MainWindow::on_table_customContextMenuRequested(const QPoint &pos)
 {
+    //This is a good idea, but is poorly implemented. It should be more similar to the double click actions.
+
+    /*
     switch (currentTable) {
     case PR:
     {
@@ -1083,7 +1218,7 @@ void MainWindow::on_table_customContextMenuRequested(const QPoint &pos)
     default:
         break;
     }
-
+    */
 }
 
 //The following are great ideas that haven't been implemented yet. It seems like it wil probably be the ifnal feature
@@ -1138,7 +1273,6 @@ void MainWindow::on_actionChange_Current_User_triggered()
     UserLogin userLogin("sim", user, LoginFlag::Login, this);
 }
 
-
 void MainWindow::on_actionEdit_Current_Userdata_triggered()
 {
     UserLogin userLogin("sim", user, LoginFlag::Edit, this);
@@ -1170,7 +1304,6 @@ void MainWindow::on_actionCreate_Purchase_Order_triggered()
         //Throw error message here.
 }
 
-
 void MainWindow::on_actionReceive_Items_triggered()
 {
     if (checkPrivelage(RR, user))
@@ -1180,9 +1313,13 @@ void MainWindow::on_actionReceive_Items_triggered()
 
 void MainWindow::on_actionDistribute_Inventory_triggered()
 {
-    if (checkPrivelage(MR, user))
-        CreateDocument(MR, NULL, user, "sim", this);
-        //Throw error message here.
+    if (checkPrivelage(MR, user)) {
+        if (user->privelage == Mechanic || user->privelage == Admin)
+            CreateDocument(MR, NULL, user, "sim", this, true);
+        else
+            CreateDocument(MR, NULL, user, "sim", this, false);
+    }
+    //Throw error message here.
 }
 
 void MainWindow::on_actionClean_Database_triggered()
@@ -1197,18 +1334,6 @@ void MainWindow::on_actionClean_Database_triggered()
         "UNION SELECT DISTINCT rrd.item_id FROM rrd "
         "UNION SELECT DISTINCT mrd.item_id FROM mrd "
     ");");
-    qDebug() << qry.lastError();
     simdb.close();
-}
-
-void MainWindow::on_SearchBox_returnPressed()
-{
-    if (!ui->SearchBox->text().isEmpty()) {
-        //This query is dangerous, because the searchTerm is not escaped
-        QString newQuery = "SELECT * FROM ("%query.chopped(1)%") WHERE `"%ui->SearchForDropdown->currentText()%"` LIKE "%escapeSql("%"%ui->SearchBox->text()%"%")%";";
-        simdb.open();
-        qry.exec(newQuery);
-        model->setQuery(qry);
-        while (model->canFetchMore()) {model->fetchMore();}
-    }
+    refresh();
 }

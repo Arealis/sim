@@ -78,7 +78,7 @@ void UserLogin::on_acceptButton_clicked()
         if (ok) {
             qryString = "UPDATE userdata SET "
                      " name = "%escapeSql(ui->nameLineEdit->text())
-                    %" ,user = "%escapeSql(ui->nameLineEdit->text())
+                    %" ,user = "%escapeSql(ui->userLineEdit->text())
                     %" ,email = "%escapeSql(ui->emailLineEdit->text())
                     %returnStringINN(ui->passLineEdit->text(), ", pass = "%escapeSql(ui->passLineEdit->text()))
                     %" WHERE id = "%user->id%";";

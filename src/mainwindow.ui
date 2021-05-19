@@ -235,6 +235,9 @@
               <verstretch>0</verstretch>
              </sizepolicy>
             </property>
+            <property name="editable">
+             <bool>false</bool>
+            </property>
             <property name="iconSize">
              <size>
               <width>16</width>
@@ -661,7 +664,7 @@
   </action>
   <action name="actionDistribute_Inventory">
    <property name="text">
-    <string>Request Items</string>
+    <string>Create Material Requisition</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+-</string>
@@ -669,7 +672,7 @@
   </action>
   <action name="actionReceive_Items">
    <property name="text">
-    <string>Receive Items</string>
+    <string>Create Receiving Report</string>
    </property>
    <property name="shortcut">
     <string>Ctrl++</string>
@@ -723,7 +726,7 @@
   </action>
   <action name="actionCreate_Quotation_Request">
    <property name="text">
-    <string>Create Quotation Request</string>
+    <string>Create Request For Quotation</string>
    </property>
   </action>
   <action name="actionCreate_Purchase_Order">
