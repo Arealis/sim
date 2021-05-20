@@ -233,23 +233,18 @@ void MainWindow::createNewSIMDB()
      *  2 - Purchasing >> can create QR, POs
      *  3 - Inventory Manager >> can create PR, MR, RR
      *  4 - Admin >> has full access to everything */
-    qry.exec("CREATE TABLE addresses ("
-                "id         INTEGER PRIMARY KEY "
-                ",address   TEXT NOT NULL "
-            ");");
-    qry.exec("INSERT INTO addresses (address) VALUES ('Unknown Address');");
     qry.exec("CREATE TABLE company ( "
-                "name                   TEXT "
-                ",info                  TEXT " //This is what shows up next to the logo on documents
-                ",shipping_address_id   INTEGER REFERENCES addresses (id) "
-                ",billing_address_id    INTEGER REFERENCES addresses (id) "
+                "name               TEXT "
+                ",info              TEXT " //This is what shows up next to the logo on documents
+                ",shipping_address  TEXT "
+                ",billing_address   TEXT "
             ");");
-    qry.exec("INSERT INTO company (name, info, shipping_address_id, billing_address_id) VALUES ('INSERT COMPANY NAME', 'INSERT COMPANY INFO', 1, 1);");
+    qry.exec("INSERT INTO company (name, info, shipping_address, billing_address) VALUES ('INSERT COMPANY NAME', 'INSERT COMPANY INFO', 1, 1);");
     qry.exec("CREATE TABLE suppliers ( "
                 "id             INTEGER PRIMARY KEY "
                 ",name          TEXT NOT NULL "
-                ",info          TEXT "
-                ",address_id	INTEGER REFERENCES addresses (id) "
+                ",address       TEXT "
+                ",internal      TEXT "
             ");");
     qry.exec("CREATE TABLE projects ( " //This can be vehicles, machines, tasks, etc.
                 "name       TEXT PRIMARY KEY " //Is is less confusing if project names are unique.
@@ -268,7 +263,7 @@ void MainWindow::createNewSIMDB()
                 "id     INTEGER PRIMARY KEY "
                 ",num   TEXT "
                 ",desc  TEXT NOT NULL "
-                ",cat   TEXT NOT NULL DEFAULT 'Unknown' "
+                ",cat   TEXT DEFAULT 'Unknown' "
                 ",qty   REAL NOT NULL DEFAULT 0 "
                 ",unit  TEXT "  //Maybe this should be each by default
                 ",shelf TEXT "	//Location of item in storage
@@ -385,16 +380,17 @@ void MainWindow::createNewSIMDB()
                 ",status                INTEGER NOT NULL DEFAULT 0 /*0=draft,1=open,2=QRSent,3=Ordered,4=Rejected,5=NotAvailable*/ "
             ");");
     qry.exec("CREATE TABLE qr ( "
-                "num                    INTEGER PRIMARY KEY "
-                ",date                  DATE "
-                ",date_needed           DATE "
-                ",supplier_id           INTEGER NOT NULL REFERENCES supplier (id) "
-                ",supplier_address_id   INTEGER NOT NULL REFERENCES addresses (id) "
-                ",requested_by          INTEGER NOT NULL REFERENCES userdata (id) "
-                ",shipping_address_id   INTEGER REFERENCES addresses (id) "
-                ",billing_address_id    INTEGER REFERENCES addresses (id) "
-                ",notes                 TEXT "
-                ",status                INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=open, 2=Closed (Quote Received)*/ "
+                "num                INTEGER PRIMARY KEY "
+                ",date              DATE "
+                ",date_needed       DATE "
+                ",requested_by      INTEGER NOT NULL REFERENCES userdata (id) "
+                ",supplier_id       INTEGER NOT NULL REFERENCES supplier (id) "
+                ",supplier_address  TEXT "
+                ",supplier_internal TEXT "
+                ",shipping_address  TEXT "
+                ",billing_address   TEXT "
+                ",notes             TEXT "
+                ",status            INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=open, 2=Closed (Quote Received)*/ "
             ");");
     qry.exec("CREATE TABLE qrd ( "
                 "id         INTEGER PRIMARY KEY "
@@ -412,9 +408,10 @@ void MainWindow::createNewSIMDB()
                 ",date                          DATE "
                 ",date_expected                 DATE "
                 ",supplier_id                   INTEGER REFERENCES suppliers (id) NOT NULL "
-                ",supplier_address_id           INTEGER REFERENCES addresses (id) "
-                ",shipping_address_id           INTEGER REFERENCES addresses (id) "
-                ",billing_address_id            INTEGER REFERENCES addresses (id) "
+                ",supplier_address              TEXT "
+                ",supplier_internal             TEXT "
+                ",shipping_address              TEXT "
+                ",billing_address               TEXT "
                 ",discount_before_tax           BOOL DEFAULT 1 "
                 ",taxable_subtotal              REAL " // This is just for storage. Whenever a document is
                 ",tax_exempt_subtotal           REAL " // opened this will be calculated on the fly
@@ -440,7 +437,7 @@ void MainWindow::createNewSIMDB()
              * 6 = Rejected............. The PO was not accepted by the vendor for some reason.
              * 7 = Forced Closed........ The PO was closed without all items being received. This may be useful in cases where the company has to cut their losses with a vendor.
              */
-    qry.exec("CREATE TABLE pod (" //POD stand for purchase order details
+    qry.exec("CREATE TABLE pod ("
                 "id             INTEGER PRIMARY KEY "
                 ",po_num        INTEGER REFERENCES po (num) ON UPDATE CASCADE "
                 ",pr_num        INTEGER REFERENCES pr (num) " //This is to internally update items in the PR as they are completed
@@ -460,16 +457,17 @@ void MainWindow::createNewSIMDB()
              *  1 = partial quantity received
              *  2 = correct quantity received
              *  3 = too much received */
-    qry.exec("CREATE TABLE rr (" //rr - Receiving Report
+    qry.exec("CREATE TABLE rr ("
                 "num                    INTEGER PRIMARY KEY "
                 ",date                  DATE NOT NULL " //Date collected
                 ",date_arrived          DATE NOT NULL "
                 ",delivered_by          TEXT NOT NULL "
                 ",inspected_by          INTEGER REFERENCES userdata (id) "
-                ",supplier_address_id   INTEGER REFERENCES addresses (id) "
                 ",po_num                INTEGER REFERENCES po (num) " //There may be no PO# in certain cases
                 ",invoice_num           INTEGER REFERENCES po (invoice_num) "
                 ",supplier_id           INTEGER REFERENCES suppliers (id) "
+                ",supplier_address      TEXT "
+                ",supplier_internal     TEXT "
                 ",notes                 TEXT "
                 ",status                INTEGER NOT NULL DEFAULT 0 "
             ");");
@@ -692,7 +690,7 @@ void MainWindow::createItem_Details_Table(QString itemId)
     "LEFT JOIN userdata ON userdata.id = rr.inspected_by "
     "WHERE rrd.item_id = %1 "
     "UNION "
-    "SELECT NULL, mr.authorized_by, mr.date, 'Material Requisition', mrd.mr_num, userdata.name, NULL, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
+    "SELECT NULL, mr.authorized_by, mr.date_authorized, 'Material Requisition', mrd.mr_num, userdata.name, NULL, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
     "FROM mrd "
     "LEFT JOIN mr ON mrd.mr_num = mr.num "
     "LEFT JOIN userdata ON userdata.id = mr.authorized_by "
@@ -732,7 +730,7 @@ void MainWindow::createProject_Details_Table(QString project)
         "LEFT JOIN userdata ON userdata.id = pr.requested_by "
         "WHERE pr.project = '%1' "
         "UNION "
-        "SELECT mrd.item_id, NULL, mr.authorized_by, userdata.name, mr.date, 'MR', mr.num, items.num, items.desc, items.unit, NULL, mrd.qty, NULL "
+        "SELECT mrd.item_id, NULL, mr.authorized_by, userdata.name, mr.date_authorized, 'MR', mr.num, items.num, items.desc, items.unit, NULL, mrd.qty, NULL "
         "FROM mrd "
         "LEFT JOIN mr ON mr.num = mrd.mr_num "
         "LEFT JOIN items ON items.id = mrd.item_id "
@@ -814,7 +812,7 @@ void MainWindow::on_actionPurchase_Requisitions_triggered()
 
     displayTable("Purchase Requisitions", simdb, query);
 
-    setHiddenColumns("requested_by");
+    setHiddenColumns("requested_by", "supplier_id");
 }
 
 void MainWindow::createPR_Details(QString prnum)
@@ -925,7 +923,7 @@ void MainWindow::createReceived_Details_Table(QString rrnum)
 void MainWindow::on_actionRequested_Items_triggered()
 {
     //This query is completely incorrect
-    query = "SELECT mr.authorized_by, userdata.name AS 'Authorized By', mr.date AS 'Date', mr.num AS 'MR#'"
+    query = "SELECT mr.authorized_by, userdata.name AS 'Authorized By', mr.date_authorized AS 'Date', mr.num AS 'MR#'"
         ", mr.requested_by AS 'Requested By', mr.collected_by AS 'Collected By', group_concat(DISTINCT mrd.project) AS 'Project(s)' "
         "FROM mr "
         "LEFT JOIN userdata ON userdata.id = mr.authorized_by "

@@ -38,18 +38,14 @@ EditCompanyInfo::EditCompanyInfo(QWidget *parent) :
     QSqlQuery qry(simdb);
 
     simdb.open();
-    qry.exec("SELECT company.name, company.info , shipping.address, billing.address "
-        "FROM company "
-        "JOIN addresses AS 'shipping' ON company.shipping_address_id = shipping.id "
-        "JOIN addresses AS 'billing' ON company.billing_address_id = billing.id "
-        ";");
+    qry.exec("SELECT company.name, company.info , company.shipping_address, company.billing_address FROM company;");
     qry.next();
     simdb.close();
+
     ui->name->setText(qry.value(0).toString());
     ui->info->setPlainText(qry.value(1).toString());
     ui->shipping->setPlainText(qry.value(2).toString());
     ui->billing->setPlainText(qry.value(3).toString());
-
     setWindowTitle("Edit Company Information");
     exec();
 }
@@ -69,13 +65,10 @@ void EditCompanyInfo::on_saveButton_clicked()
     //! explanation is that newline characters are displayed as \n while using qDebug(), but are
     //! stored as the actual newline character (ie. 10 in ascii decimal). This is a happy coincidence.
     simdb.open();
-    qry.exec("INSERT INTO addresses (address) VALUES ('"+ui->shipping->toPlainText()+"');");
-    qry.exec("UPDATE company SET shipping_address_id = (SELECT id FROM addresses ORDER BY id DESC LIMIT 1);");
-
-    qry.exec("INSERT INTO addresses (address) VALUES ('"+ui->billing->toPlainText()+"');");
-    qry.exec("UPDATE company SET billing_address_id = (SELECT id FROM addresses ORDER BY id DESC LIMIT 1);");
-
-    qry.exec("UPDATE company SET name = "%escapeSql(ui->name->text())%", info = "%escapeSql(ui->info->toPlainText())%";");
+    qry.exec("UPDATE company SET name = "%escapeSql(ui->name->text())%
+             ",info = "%escapeSql(ui->info->toPlainText())%
+             ",shipping_address = "%escapeSql(ui->shipping->toPlainText())%
+             ",billing_address = "%escapeSql(ui->billing->toPlainText())%";");
     simdb.close();
     EditCompanyInfo::close();
 }

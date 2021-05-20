@@ -134,7 +134,7 @@ public:
 
     bool documentEntryValid();
     inline bool supplierEntryValid();
-    QString validateSupplierId(QSqlQuery qry, QString supplierId, QString supplierName, QString addressId = QString(), QString info = QString());
+    QString validateSupplierId(QSqlQuery qry, QString supplierId, QString supplierName, QString address = QString(), QString internal = QString());
 
     void initTotals();
 
@@ -202,10 +202,8 @@ inline void onCompletion(QLineEdit *line, void (*function)(QLineEdit*, bool) = n
 
 inline bool POIsValidAndOpen(QSqlQuery qry, QString poNum);
 QString validateProject(QSqlQuery qry, QString project);
-QString validateAddressId(QSqlQuery qry, QString address, QString addressId = QString());
 
-QString insertNewAddress(QSqlQuery qry, QString address);
-QString insertNewSupplier(QSqlQuery qry, QString supplierName, QString addressId = QString(), QString info = QString());
+QString insertNewSupplier(QSqlQuery qry, QString supplierName, QString address = QString(), QString internal = QString());
 QString insertNewItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit = QString(), QString category = QString());
 
 void emitSignalOnCompletion(QLineEdit *line);
