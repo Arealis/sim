@@ -1562,7 +1562,7 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
                 "FROM pr JOIN userdata ON userdata.id = pr.requested_by WHERE pr.num = "%docnum%";");
         }
         qry.next();
-        ui->detailsNames->setText("Date:\nCreator:"%returnStringINN(qry.value(2).toString(),"\nEmail"));
+        ui->detailsNames->setText("Date:\nCreator:"%returnStringINN(qry.value(2).toString(),"\nEmal:"));
         ui->detailsValues->setText(qry.value(0).toString()%"\n"%qry.value(1).toString()%returnStringINN(qry.value(2).toString(),"\n"%qry.value(2).toString()));
         ui->internalWidget->findChild<QDateTimeEdit*>("date")->setDate(qry.value(3).toDate());
         findChild<QComboBox*>("project")->setEditText(qry.value(4).toString());
@@ -1585,7 +1585,7 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
                 "WHERE qr.num = "%docnum%";");
         }
         qry.next();
-        ui->detailsNames->setText("Date:\nCreator:"%returnStringINN(qry.value(2).toString(),"\nEmail"));
+        ui->detailsNames->setText("Date:\nCreator:"%returnStringINN(qry.value(2).toString(),"\nEmal:"));
         ui->detailsValues->setText(qry.value(0).toString()%"\n"%qry.value(1).toString()%returnStringINN(qry.value(2).toString(),"\n"%qry.value(2).toString()));
         ui->internalWidget->findChild<QDateTimeEdit*>("date")->setDate(qry.value(3).toDate());
         ui->notes->setPlainText(qry.value(4).toString());
@@ -1625,9 +1625,7 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
         ui->internalWidget->findChild<QDateTimeEdit*>("date")->setDate(qry.value(3).toDate());
         ui->notes->setPlainText(qry.value(4).toString());
 
-        if (qry.value(5).isNull()) {
-            ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo")->setPlaceholderText("Select Supplier");
-        } else {
+        if (!qry.value(5).isNull()) {
             QComboBox *combo = ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo");
             combo->setCurrentIndex(matchingRow(qry.value(5).toString(), combo->model()));
         }
@@ -1639,7 +1637,7 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
         break;
     } //11762
     case RR: {
-        bool validPO = POIsValidAndOpen(qry, docnum);
+        bool validPO = POIsValidAndOpen(qry, docnum); // A valid PO is a PO that exists, and is open (ie. the goods have not yet been delivered).
         //date, name, email, date_arrived, notes, po_num, invoice_num, delivered_by, supplier_id, supplier_internal, supplier_address
         if (modifier == PO) {
             if (validPO) {
@@ -1666,18 +1664,20 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
                     "WHERE rr.num = "%docnum%";");
         }
         qry.next();
-        ui->detailsNames->setText("Date:\nInspector:"%returnStringINN(qry.value(2).toString(),"\nEmail"));
+        ui->detailsNames->setText("Date:\nInspector:"%returnStringINN(qry.value(2).toString(),"\nEmal:"));
         ui->detailsValues->setText(qry.value(0).toString()%"\n"%qry.value(1).toString()%returnStringINN(qry.value(2).toString(),"\n"%qry.value(2).toString()));
         ui->internalWidget->findChild<QDateTimeEdit*>("date")->setDate(qry.value(3).toDate());
         ui->notes->setPlainText(qry.value(4).toString());
         if (qry.value(5).isNull()) {
-            ui->internalDetails->findChild<QComboBox*>("po")->setPlaceholderText("Select PO");
-        } else if (!validPO) {
-            ui->internalDetails->findChild<QComboBox*>("po")->setEditText(docnum);
+            break;
         } else {
-            QComboBox *combo = ui->internalDetails->findChild<QComboBox*>("po");
-            combo->setCurrentIndex(matchingRow(qry.value(5).toString(), combo->model()));
-            ui->internalDetails->findChild<QLineEdit*>("invoice")->setText(qry.value(6).toString());
+            QComboBox *poCombo = ui->internalDetails->findChild<QComboBox*>("po");
+            if (!validPO) {
+                poCombo->setEditText(docnum);
+            } else {
+                poCombo->setCurrentIndex(matchingRow(qry.value(5).toString(), poCombo->model()));
+                ui->internalDetails->findChild<QLineEdit*>("invoice")->setText(qry.value(6).toString());
+            }
         }
         if (!qry.value(7).isNull()) {
             QComboBox *combo = ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo");
@@ -1690,15 +1690,14 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
     }
     case MR: {
         if (docnum.isEmpty() && authorized) {
-            qry.exec("SELECT date('now', 'localtime'), null, null, null, null "
-                ", null, null, null, null, null, notes "
+            qry.exec("SELECT date('now', 'localtime'), null, null, null "
+                ",null, null, null, null, notes "
                     "FROM default_notes "
-                    "JOIN userdata ON userdata.id = "%user->id%
                     " WHERE tflag = "%QString::number(MR)%";");
         } else {
             //An issuer cannot create MRs, they can only issue them.
-            qry.exec("SELECT date(mr.date_requested,'localtime'), mr.requested_by, date(mr.date_authorized, 'localtime'), authorizer.name, authorizer.email "
-                ",date(mr.date_issued, 'localtime'), issuer.name, issuer.email, mr.collected_by, mr.project, mr.notes "
+            qry.exec("SELECT date(mr.date_requested,'localtime'), mr.requested_by, date(mr.date_authorized, 'localtime'), authorizer.name "
+                ",date(mr.date_issued, 'localtime'), issuer.name, mr.collected_by, mr.project, mr.notes "
                     "FROM mr "
                     "LEFT JOIN userdata AS 'authorizer' ON userdata.id = mr.authorized_by"
                     "LEFT JOIN userdata AS 'issuer' ON userdata.id = mr.issued_by "
@@ -1706,24 +1705,19 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
         }
         qry.next();
         //REMOVE EMAILS
-        ui->detailsNames->setText("Date Requested:\nDate Authorized:\nAuthorized by:"%returnStringINN(qry.value(4).toString(), "\nAuthorizer Email:")%
-                                  "\nDate Issued:\nIssued by:"%returnStringINN(qry.value(7).toString(), "\nIssuer Email:"));
+        ui->detailsNames->setText("Date Requested:\nDate Authorized:\nAuthorized by:\nDate Issued:\nIssued by:");
         ui->detailsValues->setText(qry.value(0).toString()
                                    %"\n"%qry.value(2).toString()
                                    %"\n"%(authorized ? returnStringINN(qry.value(3).toString(), qry.value(3).toString(), user->name) : qry.value(3).toString())
-                                   %returnStringINN(qry.value(4).toString(), "\n"%qry.value(4).toString())
-                                   %"\n"%qry.value(5).toString()
-                                   %"\n"%(authorized ? qry.value(6).toString() : returnStringINN(qry.value(6).toString(), qry.value(6).toString(), user->name))
-                                   %returnStringINN(qry.value(7).toString(), "\n"%qry.value(7).toString()));
+                                   %"\n"%qry.value(4).toString()
+                                   %"\n"%(authorized ? qry.value(5).toString() : returnStringINN(qry.value(5).toString(), qry.value(5).toString(), user->name)));
         ui->internalDetails->findChild<QLineEdit*>("requested_by")->setText(qry.value(1).toString());
-        ui->internalDetails->findChild<QLineEdit*>("collected_by")->setText(qry.value(8).toString());
-        if (qry.value(9).isNull()) {
-            ui->internalDetails->findChild<QComboBox*>("project")->setPlaceholderText("Select Project");
-        } else {
+        ui->internalDetails->findChild<QLineEdit*>("collected_by")->setText(qry.value(6).toString());
+        if (!qry.value(7).isNull()) {
             QComboBox *combo = ui->info->findChild<QComboBox*>("project");
-            combo->setCurrentIndex(matchingRow(qry.value(9).toString(), combo->model()));
+            combo->setCurrentIndex(matchingRow(qry.value(7).toString(), combo->model()));
         }
-        ui->notes->setPlainText(qry.value(10).toString());
+        ui->notes->setPlainText(qry.value(8).toString());
         break;
     }
     default:
