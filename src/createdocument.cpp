@@ -952,7 +952,6 @@ QWidget *CreateDocument::initDynamicInfoWidget(QWidget *parent, WidgetType widge
         db.open();
         qry.exec("SELECT suppliers.name, suppliers.id, suppliers.address, suppliers.internal FROM suppliers;");
         for (int row = 0; qry.next(); row++) {
-            qDebug() << qry.value(3).toString();
             model->setItem(row, 0, new QStandardItem(qry.value(0).toString()));
             model->setItem(row, 1, new QStandardItem(qry.value(1).toString()));
             model->setItem(row, 2, new QStandardItem(qry.value(2).toString()));
@@ -1070,7 +1069,6 @@ void CreateDocument::initTotals() //Need to fix how QSqlQueries work in the prog
 
     discountBeforeTax = new QCheckBox("Discount Before Tax", ui->internalWidget);
     discountBeforeTax->setChecked(true);
-    qDebug() << ui->internalDetailsGrid->rowCount();
     ui->internalDetailsGrid->addWidget(discountBeforeTax, ui->internalDetailsGrid->rowCount(), 0, 1, 2);
 
     //Declare everything so we can work from the top down
@@ -1614,7 +1612,7 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
                     "JOIN company ON company.rowid = 1 "
                 "WHERE tflag = "%QString::number(PO)%";");
         } else {
-            qry.exec("SELECT date(po.date,'localtime'), userdata.name, userdata.email date(po.date_needed,'localtime'), po.notes "
+            qry.exec("SELECT date(po.date,'localtime'), userdata.name, userdata.email, date(po.date_needed,'localtime'), po.notes "
                 ",po.supplier_id, po.supplier_internal, po.supplier_address, po.shipping_address, po.billing_address "
                 "FROM po "
                     "JOIN userdata ON userdata.id = po.requested_by "
@@ -2044,19 +2042,6 @@ void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDoc
                 %","%escapeSql(ui->notes->toPlainText())
                 %","%QString::number(status)
             %");");
-        qDebug() << "INSERT INTO qr (num, date, date_needed, requested_by, supplier_id, supplier_address, shipping_address, billing_address, notes, status) "
-            "VALUES ("
-                %newDocNum
-                %",datetime('now')"
-                 ",'"%ui->internalWidget->findChild<QDateTimeEdit*>("date")->date().toString("yyyy-MM-dd")%"'"
-                 ","%user->id
-                %","%supplierId
-                %","%escapeSql(supplierAddress)
-                %","%escapeSql(shippingAddress)
-                %","%escapeSql(billingAddress)
-                %","%escapeSql(ui->notes->toPlainText())
-                %","%QString::number(status)
-            %");" << qry.lastError();
         break;
     }
     case PO: {
@@ -2269,17 +2254,11 @@ QString insertNewSupplier(QSqlQuery qry, QString supplierName, QString address, 
 
 QString insertNewItem(QSqlQuery qry, QString itemNum, QString itemDesc, QString unit, QString category)
 {
-    qDebug() << QString("INSERT INTO items (num, desc, unit, cat) VALUES (%1, %2, %3, %4);")
-                .arg(escapeSql(itemNum)
-                     ,escapeSql(itemDesc)
-                     ,escapeSql(unit)
-                     ,escapeSql(category));
     qry.exec(QString("INSERT INTO items (num, desc, unit, cat) VALUES (%1, %2, %3, %4);")
              .arg(escapeSql(itemNum)
                   ,escapeSql(itemDesc)
                   ,escapeSql(unit)
                   ,escapeSql(category)));
-    qDebug() << qry.lastError();
     qry.exec("SELECT id FROM items ORDER BY id DESC LIMIT 1;");
     qry.next();
     return qry.value(0).toString();
