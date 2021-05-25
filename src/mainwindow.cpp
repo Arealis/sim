@@ -239,7 +239,7 @@ void MainWindow::createNewSIMDB()
                 ",shipping_address  TEXT "
                 ",billing_address   TEXT "
             ");");
-    qry.exec("INSERT INTO company (name, info, shipping_address, billing_address) VALUES ('INSERT COMPANY NAME', 'INSERT COMPANY INFO', 1, 1);");
+    qry.exec("INSERT INTO company (name, info, shipping_address, billing_address) VALUES ('[No Company Name]', '[No Company Info]', '[No Shipping Address]', '[No Billing Address]');");
     qry.exec("CREATE TABLE suppliers ( "
                 "id             INTEGER PRIMARY KEY "
                 ",name          TEXT NOT NULL "
@@ -373,6 +373,7 @@ void MainWindow::createNewSIMDB()
                 ",pr_num                INTEGER NOT NULL REFERENCES pr (num) ON UPDATE CASCADE "
                 ",item_id               INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty                   REAL NOT NULL "
+                ",qty_not_ordered       REAL "
                 ",supplier_id           INTEGER REFERENCES suppliers (id) /*The suggested supplier*/ "
                 ",expected_unit_price   REAL "
                 ",taxable               BOOLEAN "
@@ -390,16 +391,19 @@ void MainWindow::createNewSIMDB()
                 ",shipping_address  TEXT "
                 ",billing_address   TEXT "
                 ",notes             TEXT "
-                ",status            INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=open, 2=Closed (Quote Received)*/ "
+                ",status            INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=open, 2=Closed (Quote Received), 3=Discarded*/ "
             ");");
     qry.exec("CREATE TABLE qrd ( "
                 "id         INTEGER PRIMARY KEY "
                 ",qr_num    INTEGER NOT NULL REFERENCES qr (num) "
-                ",prd_id    INTEGER REFERENCES prd (id) "
                 ",item_id   INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty       REAL NOT NULL "
                 ",notes     TEXT "
-                ",status    INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=Open, 2=Quoted, 3=NotAvailable*/"
+                ",status    INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=Open, 2=Quoted, 3=PriceNotAvailable, 4=Discarded*/"
+            ");");
+    qry.exec("CREATE TABLE prd_qrd_linker ("
+                "prd_id INTEGER NOT NULL REFERENCES prd (id) "
+                ",qrd_id INTEGER NOT NULL REFERENCES qrd (id) "
             ");");
     qry.exec("CREATE TABLE po ( "
                 "num                            INTEGER PRIMARY KEY "
@@ -440,15 +444,13 @@ void MainWindow::createNewSIMDB()
     qry.exec("CREATE TABLE pod ("
                 "id             INTEGER PRIMARY KEY "
                 ",po_num        INTEGER REFERENCES po (num) ON UPDATE CASCADE "
-                ",pr_num        INTEGER REFERENCES pr (num) " //This is to internally update items in the PR as they are completed
                 ",item_id       INTEGER REFERENCES items (id) ON UPDATE CASCADE NOT NULL "
                 ",qty           REAL NOT NULL "
-                ",unit          TEXT "
                 ",unit_price    REAL NOT NULL "
                 ",discount_rate REAL " // This may not be shown, but may be useful internally
                 ",discount      REAL " // Amount
                 ",taxable       BOOL NOT NULL DEFAULT 1 " //Can tax be applied to this item?
-                ",price         REAL NOT NULL " //qty * unit_price - discount
+                ",total         REAL NOT NULL " //qty * unit_price - discount
                 ",status        INTEGER NOT NULL DEFAULT 0 " // See below for status info
                 ",condition     TEXT " // This is a mirror of the condition in receiving report details
             ");");
@@ -457,6 +459,10 @@ void MainWindow::createNewSIMDB()
              *  1 = partial quantity received
              *  2 = correct quantity received
              *  3 = too much received */
+    qry.exec("CREATE TABLE prd_pod_linker ("
+                "prd_id INTEGER NOT NULL REFERENCES prd (id) "
+                ",pod_id INTEGER NOT NULL REFERENCES pod (id) "
+            ");");
     qry.exec("CREATE TABLE rr ("
                 "num                    INTEGER PRIMARY KEY "
                 ",date                  DATE NOT NULL " //Date collected
@@ -474,6 +480,7 @@ void MainWindow::createNewSIMDB()
     qry.exec("CREATE TABLE rrd ("
                 "id             INTEGER PRIMARY KEY "
                 ",rr_num        INTEGER NOT NULL REFERENCES rr (num) ON UPDATE CASCADE "
+                ",pod_id        INTEGER REFERENCES pod (id) ON UPDATE CASCADE "
                 ",item_id       INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty           REAL NOT NULL " //This has to be checked against the PO
                 ",unit          TEXT "
@@ -612,25 +619,35 @@ void MainWindow::on_actionItem_History_triggered() //Every transaction in the In
     "LEFT JOIN suppliers ON suppliers.id = prd.supplier_id "
     "LEFT JOIN userdata ON userdata.id = pr.requested_by "
     "UNION "
-    "SELECT qr.supplier_id, qr.requested_by, qr.date, 'Request for Quotation', qr.num, userdata.name, NULL , qrd.qty, NULL, suppliers.name, qrd_pr.project, NULL, NULL "
+    "SELECT qr.supplier_id, qr.requested_by, qr.date, 'Request for Quotation', qr.num, userdata.name, NULL , qrd.qty, NULL, suppliers.name, GROUP_CONCAT(pr.project), NULL, NULL "
     "FROM qrd "
     "LEFT JOIN qr ON qrd.qr_num = qr.num "
     "LEFT JOIN suppliers ON suppliers.id = qr.supplier_id "
     "LEFT JOIN userdata ON userdata.id = qr.requested_by "
-    "LEFT JOIN prd AS 'qrd_prd' ON qrd_prd.id = qrd.prd_id "
-    "LEFT JOIN pr AS 'qrd_pr' ON qrd_pr.num = qrd_prd.pr_num "
+    "LEFT JOIN prd_qrd_linker AS 'linker' ON linker.qrd_id = qrd.id "
+    "LEFT JOIN prd ON prd.id = linker.prd_id "
+    "LEFT JOIN pr ON pr.num = prd.pr_num "
+    "GROUP BY qrd.id "
     "UNION "
-    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, NULL, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
+    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, NULL, NULL, pod.qty, suppliers.name, GROUP_CONCAT(pr.project), NULL, NULL "
     "FROM pod "
     "LEFT JOIN po ON pod.po_num = po.num "
     "LEFT JOIN suppliers ON suppliers.id = po.supplier_id "
     "LEFT JOIN userdata ON userdata.id = po.authorized_by "
+    "LEFT JOIN prd_pod_linker AS 'linker' ON linker.pod_id = pod.id "
+    "LEFT JOIN prd ON prd.id = linker.prd_id "
+    "LEFT JOIN pr ON pr.num = prd.pr_num "
+    "GROUP BY pod.id "
     "UNION "
-    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, NULL, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
+    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, NULL, NULL, NULL, suppliers.name, GROUP_CONCAT(pr.project), rrd.qty, NULL "
     "FROM rrd "
     "LEFT JOIN rr ON rrd.rr_num = rr.num "
     "LEFT JOIN suppliers ON suppliers.id = rr.supplier_id "
     "LEFT JOIN userdata ON userdata.id = rr.inspected_by "
+    "LEFT JOIN prd_pod_linker AS 'linker' ON linker.pod_id = rrd.pod_id "
+    "LEFT JOIN prd ON prd.id = linker.prd_id "
+    "LEFT JOIN pr ON pr.num = prd.pr_num "
+    "GROUP BY rrd.id "
     "UNION "
     "SELECT NULL, mr.authorized_by, mr.date_authorized, 'Material Requisition', mrd.mr_num, userdata.name, NULL, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
     "FROM mrd "
@@ -667,28 +684,38 @@ void MainWindow::createItem_Details_Table(QString itemId)
     "LEFT JOIN userdata ON userdata.id = pr.requested_by "
     "WHERE prd.item_id = %1 "
     "UNION "
-    "SELECT qr.supplier_id, qr.requested_by, qr.date, 'Request for Quotation', qr.num, userdata.name, NULL , qrd.qty, NULL, suppliers.name, qrd_pr.project, NULL, NULL "
+    "SELECT qr.supplier_id, qr.requested_by, qr.date, 'Request for Quotation', qr.num, userdata.name, NULL , qrd.qty, NULL, suppliers.name, GROUP_CONCAT(pr.project), NULL, NULL "
     "FROM qrd "
     "LEFT JOIN qr ON qrd.qr_num = qr.num "
     "LEFT JOIN suppliers ON suppliers.id = qr.supplier_id "
     "LEFT JOIN userdata ON userdata.id = qr.requested_by "
-    "LEFT JOIN prd AS 'qrd_prd' ON qrd_prd.id = qrd.prd_id "
-    "LEFT JOIN pr AS 'qrd_pr' ON qrd_pr.num = qrd_prd.pr_num "
+    "LEFT JOIN prd_qrd_linker AS 'linker' ON linker.qrd_id = qrd.id "
+    "LEFT JOIN prd ON prd.id = linker.prd_id "
+    "LEFT JOIN pr ON pr.num = prd.pr_num "
     "WHERE qrd.item_id = %1 "
+    "GROUP BY qrd.id "
     "UNION "
-    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, NULL, NULL, pod.qty, suppliers.name, NULL, NULL, NULL "
+    "SELECT po.supplier_id, po.authorized_by, po.date, 'Purchase Order', pod.po_num, userdata.name, NULL, NULL, pod.qty, suppliers.name, GROUP_CONCAT(pr.project), NULL, NULL "
     "FROM pod "
     "LEFT JOIN po ON pod.po_num = po.num "
     "LEFT JOIN suppliers ON suppliers.id = po.supplier_id "
     "LEFT JOIN userdata ON userdata.id = po.authorized_by "
+    "LEFT JOIN prd_pod_linker AS 'linker' ON linker.pod_id = pod.id "
+    "LEFT JOIN prd ON prd.id = linker.prd_id "
+    "LEFT JOIN pr ON pr.num = prd.pr_num "
     "WHERE pod.item_id = %1 "
+    "GROUP BY pod.id "
     "UNION "
-    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, NULL, NULL, NULL, suppliers.name, NULL, rrd.qty, NULL "
+    "SELECT rr.supplier_id, rr.inspected_by, rr.date, 'Receiving Report', rrd.rr_num, userdata.name, NULL, NULL, NULL, suppliers.name, GROUP_CONCAT(pr.project), rrd.qty, NULL "
     "FROM rrd "
     "LEFT JOIN rr ON rrd.rr_num = rr.num "
     "LEFT JOIN suppliers ON suppliers.id = rr.supplier_id "
     "LEFT JOIN userdata ON userdata.id = rr.inspected_by "
+    "LEFT JOIN prd_pod_linker AS 'linker' ON linker.pod_id = rrd.pod_id "
+    "LEFT JOIN prd ON prd.id = linker.prd_id "
+    "LEFT JOIN pr ON pr.num = prd.pr_num "
     "WHERE rrd.item_id = %1 "
+    "GROUP BY rrd.id "
     "UNION "
     "SELECT NULL, mr.authorized_by, mr.date_authorized, 'Material Requisition', mrd.mr_num, userdata.name, NULL, NULL, NULL, NULL, mr.project, NULL, mrd.qty "
     "FROM mrd "
@@ -762,7 +789,7 @@ void MainWindow::createSuppliers_Details_Table(QString supplierId)
         "LEFT JOIN userdata ON userdata.id = pr.requested_by "
         "WHERE prd.supplier_id = %1 "
         "UNION "
-        "SELECT pod.item_id, po.authorized_by, po.date, userdata.name, 'PO', pod.po_num, NULL, items.num, items.desc, items.unit, NULL, pod.qty, NULL, pod.unit_price, pod.price "
+        "SELECT pod.item_id, po.authorized_by, po.date, userdata.name, 'PO', pod.po_num, NULL, items.num, items.desc, items.unit, NULL, pod.qty, NULL, pod.unit_price, pod.total "
         "FROM pod "
         "LEFT JOIN po ON po.num = pod.po_num "
         "LEFT JOIN items ON items.id = pod.item_id "
@@ -861,13 +888,13 @@ void MainWindow::createQR_Details(QString qrnum)
 void MainWindow::on_actionPurchase_Orders_triggered()
 {
     query = "SELECT po.authorized_by, po.supplier_id, userdata.name AS 'Created By', po.date AS 'Date', po.num AS 'PO#' "
-        ",suppliers.name AS 'Supplier', total AS 'Total Price', ship_by AS 'Shipper' "
+        ",suppliers.name AS 'Supplier', total AS 'Total Price' "
         ",CASE status "
-            "WHEN 0 THEN 'Closed '"
-            "WHEN 1 THEN 'Partial' "
-            "WHEN 2 THEN 'Shipped' "
-            "WHEN 3 THEN 'Sent' "
-            "WHEN 4 THEN 'DRAFT' "
+            "WHEN 0 THEN 'DRAFT' "
+            "WHEN 1 THEN 'Closed' "
+            "WHEN 2 THEN 'Partial' "
+            "WHEN 3 THEN 'Shipped' "
+            "WHEN 5 THEN 'Sent' "
         "END as 'Status' "
         "FROM po "
         "LEFT JOIN userdata ON po.authorized_by = userdata.id "
@@ -881,9 +908,23 @@ void MainWindow::on_actionPurchase_Orders_triggered()
 
 void MainWindow::createPOD_Table(QString ponum)
 {
-    query = "SELECT po.date, suppliers.name FROM po JOIN suppliers ON suppliers.id = po.supplier_id WHERE po.num = "%ponum%";";
+    query = "SELECT po.supplier_id, po.authorized_by, po.date AS 'Date Created', po.date_expected AS 'Date Expected', userdata.name AS 'Created By' "
+    ",suppliers.name AS 'Supplier', items.num AS 'Item Id', items.desc AS 'Description', pod.qty AS 'Qty', GROUP_CONCAT(pr.project) AS 'Used For' "
+    "FROM pod "
+        "LEFT JOIN po ON pod.po_num = po.num "
+        "LEFT JOIN items ON items.id = pod.item_id "
+        "LEFT JOIN suppliers ON suppliers.id = po.supplier_id "
+        "LEFT JOIN userdata ON userdata.id = po.authorized_by "
+        "LEFT JOIN prd_pod_linker AS 'linker' ON linker.pod_id = pod.id "
+        "LEFT JOIN prd ON prd.id = linker.prd_id "
+        "LEFT JOIN pr ON pr.num = prd.pr_num "
+    "WHERE po.num = "%ponum%" "
+    "GROUP BY pod.id"
+    ";";
 
     displayTable("Purchase Order #"%ponum, simdb, query);
+
+    setHiddenColumns("supplier_id", "authorized_by");
 }
 
 void MainWindow::on_actionReceived_triggered()
@@ -891,9 +932,9 @@ void MainWindow::on_actionReceived_triggered()
     query = "SELECT rr.supplier_id, rr.inspected_by, rr.date_arrived AS 'Arrival Date', userdata.name AS 'Inspected By', rr.date 'Collection Date', rr.num AS 'RR#', rr.po_num AS 'PO#'"
         ", suppliers.name AS 'Supplier'"
         ", CASE po.status "
-            "WHEN 0 THEN 'Closed' "
-            "WHEN 1 THEN 'Incomplete' "
-            "ELSE NULL "
+            "WHEN 0 THEN 'Draft' "
+            "WHEN 1 THEN 'Closed' "
+            "WHEN 2 THEN 'Incomplete' "
         "END AS 'PO Status' "
         "FROM rr "
         "LEFT JOIN suppliers ON suppliers.id = rr.supplier_id "
@@ -1074,8 +1115,10 @@ void MainWindow::on_table_doubleClicked(const QModelIndex &index)
         break;
     }
     case ColumnFlags::PONum: {
-        //This function doesn't exist yet
-        //createPO_Details(index.data().toString());
+        if (siblingAtHeader(index, "Status") == "DRAFT")
+            CreateDocument doc(PO, index.data().toString(), user, "sim", this);
+        else
+            createPOD_Table(index.data().toString());
         break;
     }
     case ColumnFlags::RRNum: {

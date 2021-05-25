@@ -133,7 +133,11 @@ CreateDocument::CreateDocument(TableFlag tableFlag, QString docNum, User *userDa
         QSqlQueryModel *itemModel = new QSqlQueryModel(this);
         itemModel->setObjectName(QString::number(ModelFlag::Item));
         db.open();
-        itemModel->setQuery("SELECT i.id, i.num, i.desc, i.cat, i.unit, prd.id FROM prd JOIN items AS 'i' ON i.id = prd.item_id WHERE prd.status = 1 OR prd.status = 2;", db);
+        itemModel->setQuery("SELECT items.id, items.num, items.desc, items.cat, items.unit, GROUP_CONCAT(prd.id), SUM(prd.qty_not_ordered) "
+                "FROM prd "
+                "LEFT JOIN items ON items.id = prd.item_id "
+                "WHERE prd.status > 0 AND prd.status < 4 "
+                "GROUP BY items.id;", db);
         while (itemModel->canFetchMore()) { itemModel->fetchMore(); }
         db.close();
 
@@ -165,7 +169,11 @@ CreateDocument::CreateDocument(TableFlag tableFlag, QString docNum, User *userDa
         QSqlQueryModel *itemModel = new QSqlQueryModel(this);
         itemModel->setObjectName(QString::number(ModelFlag::Item));
         db.open();
-        itemModel->setQuery("SELECT i.id, i.num, i.desc, i.cat, i.unit FROM prd JOIN items AS 'i' ON i.id = prd.item_id WHERE prd.status = 1;", db);
+        itemModel->setQuery("SELECT items.id, items.num, items.desc, items.cat, items.unit, GROUP_CONCAT(prd.id), SUM(prd.qty_not_ordered) "
+                "FROM prd "
+                "LEFT JOIN items ON items.id = prd.item_id "
+                "WHERE prd.status > 0 AND prd.status < 4 "
+                "GROUP BY items.id;", db);
         while (itemModel->canFetchMore()) { itemModel->fetchMore(); }
         db.close();
 
@@ -430,11 +438,12 @@ void ResizableTable::initializeColumns()
         break;
     }
     case PO: {
-        colNames = {"id", "Item ID", "Description", "Category", "Unit", "Qty", "Unit Price", "Tax?", "Total", "Status"};
-        cid.unitPrice = 6;
-        cid.taxable = 7;
+        colNames = {"id", "Item ID", "Description", "Category", "Unit", "Qty", "Tax?", "Unit Price", "Total", "Status", "prd.id"};
+        cid.taxable = 6;
+        cid.unitPrice = 7;
         cid.total = 8;
         cid.status = 9;
+        cid.prdId = 10;
         break;
     }
     case RR: {
@@ -471,14 +480,13 @@ void ResizableTable::resizeEvent(QResizeEvent *event) //This is called multiple 
     int w = width();
     //Resizing windows based on tFlag
     switch (tflag) {
-    case PR: {
-        //{"id", "Item ID", "Description", "Qty", "Unit","sid", "Recommended Supplier", "taxable", "Expected Price", "total", "Status"};
+    case PR: {;
         w = w / 22;
         setColumnWidth(cid.itemNum  ,w*3);
         setColumnWidth(cid.itemDesc ,w*5);
         setColumnWidth(cid.cat      ,w*2);
-        setColumnWidth(cid.qty      ,w*1);
         setColumnWidth(cid.unit     ,w*2);
+        setColumnWidth(cid.qty      ,w*1);
         setColumnWidth(cid.supplier ,w*3);
         setColumnWidth(cid.taxable  ,w*1);
         setColumnWidth(cid.unitPrice,w*2);
@@ -490,9 +498,21 @@ void ResizableTable::resizeEvent(QResizeEvent *event) //This is called multiple 
         setColumnWidth(cid.itemNum  ,w*3);
         setColumnWidth(cid.itemDesc ,w*5);
         setColumnWidth(cid.cat      ,w*2);
-        setColumnWidth(cid.qty      ,w*1);
         setColumnWidth(cid.unit     ,w*2);
+        setColumnWidth(cid.qty      ,w*1);
         setColumnWidth(cid.notes    ,w*5);
+        break;
+    }
+    case PO: {
+        w = w / 19;
+        setColumnWidth(cid.itemNum  ,w*3);
+        setColumnWidth(cid.itemDesc ,w*5);
+        setColumnWidth(cid.cat      ,w*2);
+        setColumnWidth(cid.unit     ,w*2);
+        setColumnWidth(cid.qty      ,w*1);
+        setColumnWidth(cid.unitPrice,w*2);
+        setColumnWidth(cid.taxable  ,w*1);
+        setColumnWidth(cid.total    ,w*2);
         break;
     }
     }
@@ -526,7 +546,10 @@ void ResizableTable::appendRow()
         break;
     }
     case PO: {
+        initTaxCheckBox(finalRow, cid.taxable);
+        initLineEdit(finalRow, Disabled, cid.total);
         setColumnHidden(cid.status, true);
+        setColumnHidden(cid.prdId, true);
         break;
     }
     default:
@@ -555,7 +578,7 @@ void ResizableTable::fetchRows(QSqlQuery qry, QString docnum, TableFlag modifier
         break;
     }
     case PO: {
-        qry.exec("SELECT pod.item_id, items.num, items.desc, items.cat, items.unit, pod.qty, pod.unit_price, pod.taxable, pod.total, pod.status "
+        qry.exec("SELECT pod.item_id, items.num, items.desc, items.cat, items.unit, pod.qty, pod.taxable, pod.unit_price, pod.total, pod.status "
             "FROM pod "
             "LEFT JOIN items ON items.id = pod.item_id "
             "WHERE pod.po_num = "%docnum%";");
@@ -728,30 +751,32 @@ void ResizableTable::initLineEdit(int row, lineType type, int column)
                         item(row, cid.itemId)->setText(stringAt(completer,0));
 
                         changeCompletionModel(descLine, stringAt(completer, 0), stringAt(completer, 2));
-                        changeCompletionModel(unitLine, stringAt(completer, 0), stringAt(completer, 3));
-                        changeCompletionModel(catLine, stringAt(completer, 0), stringAt(completer, 4));
+                        changeCompletionModel(catLine, stringAt(completer, 0), stringAt(completer, 3));
+                        changeCompletionModel(unitLine, stringAt(completer, 0), stringAt(completer, 4));
 
                         line->setStyleSheet(CSS::Normal);
                         descLine->setStyleSheet(CSS::Normal);
                         catLine->setStyleSheet(CSS::Normal);
                         unitLine->setStyleSheet(CSS::Normal);
 
-                        if (tflag == QR) {
+                        if (tflag == QR || tflag == PO) {
                             item(row, cid.prdId)->setText(stringAt(completer, 5));
+                            item(row, cid.qty)->setText(stringAt(completer, 6));
                         }
                     } else {
-                        item(row, cid.itemId)->setText("");
+                        item(row, cid.itemId)->setText(QString());
 
-                        changeCompletionModel(descLine, "", "");
-                        changeCompletionModel(unitLine, "", "");
-                        changeCompletionModel(catLine, "", "");
+                        changeCompletionModel(descLine, QString(), QString());
+                        changeCompletionModel(unitLine, QString(), QString());
+                        changeCompletionModel(catLine, QString(), QString());
 
                         line->setStyleSheet(CSS::Alert);
                         descLine->setStyleSheet(CSS::Alert);
                         catLine->setStyleSheet(CSS::Alert);
                         unitLine->setStyleSheet(CSS::Alert);
-                        if (tflag == QR) { //QRs should never be allowed to reach this state
-                            item(row, cid.prdId)->setText("");
+                        if (tflag == QR || tflag == PO) { //QRs and PRs should never reach this state, since they should only allow items that have a PR
+                            item(row, cid.prdId)->setText(QString());
+                            item(row, cid.qty)->setText(QString());
                         }
                     }
                 });
@@ -977,6 +1002,7 @@ QWidget *CreateDocument::initDynamicInfoWidget(QWidget *parent, WidgetType widge
             address->setPlainText(model->index(index, 2).data().toString());
             internal->setPlainText(model->index(index, 3).data().toString());
         });
+        // connect (comboBox->completer(), static_cast<void(QCompleter::*)(const QModelIndex &index)>(&QCompleter::activated), [])
         break;
     }
     case ShippingAddress: {
@@ -1555,10 +1581,10 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
     switch (tFlag) {
     case PR: {
         if (docnum.isEmpty()) {
-            qry.exec("SELECT date('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", date('now', 'localtime'), null, notes "
+            qry.exec("SELECT DATE('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", DATE('now', 'localtime'), null, notes "
                 "FROM default_notes WHERE tflag = "%QString::number(PR)%";");
         } else {
-            qry.exec("SELECT date(pr.date,'localtime'), userdata.name, userdata.email, date(pr.date_needed,'localtime'), pr.project, pr.notes "
+            qry.exec("SELECT DATE(pr.date,'localtime'), userdata.name, userdata.email, DATE(pr.date_needed,'localtime'), pr.project, pr.notes "
                 "FROM pr JOIN userdata ON userdata.id = pr.requested_by WHERE pr.num = "%docnum%";");
         }
         qry.next();
@@ -1571,13 +1597,13 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
     }
     case QR: {
         if (docnum.isEmpty()) {
-            qry.exec("SELECT date('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", date('now', 'localtime'), default_notes.notes "
+            qry.exec("SELECT DATE('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", DATE('now', 'localtime'), default_notes.notes "
                 ",null, null, null, company.shipping_address, company.billing_address "
                     "FROM default_notes "
                     "JOIN company ON company.rowid = 1 "
                 "WHERE tflag = "%QString::number(QR)%";");
         } else {
-            qry.exec("SELECT date(qr.date,'localtime'), userdata.name, userdata.email, date(qr.date_needed,'localtime'), qr.notes "
+            qry.exec("SELECT DATE(qr.date,'localtime'), userdata.name, userdata.email, DATE(qr.date_needed,'localtime'), qr.notes "
                 ",qr.supplier_id, suppliers.internal, qr.supplier_address, qr.shipping_address, qr.billing_address "
                     "FROM qr "
                     "JOIN userdata ON userdata.id = qr.requested_by "
@@ -1590,12 +1616,11 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
         ui->internalWidget->findChild<QDateTimeEdit*>("date")->setDate(qry.value(3).toDate());
         ui->notes->setPlainText(qry.value(4).toString());
 
+        QComboBox *combo = ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo");
         if (qry.value(5).isNull()) {
-            ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo")->setEditText(qry.value(5).toString());
+            combo->setEditText(qry.value(5).toString());
         } else {
-            QComboBox *combo = ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo");
-            int row = matchingRow(qry.value(5).toString(), combo->model());
-            combo->setCurrentIndex(row);
+            combo->setCurrentIndex(matchingRow(qry.value(5).toString(), combo->model()));
         }
 
         ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QPlainTextEdit*>("internal")->setPlainText(qry.value(6).toString());
@@ -1606,27 +1631,30 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
     }
     case PO: {
         if (docnum.isEmpty()) {
-            qry.exec("SELECT date('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", date('now', 'localtime'), default_notes.notes "
+            qry.exec("SELECT DATE('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", DATE('now', 'localtime'), default_notes.notes "
                 ",null, null, null, company.shipping_address, company.billing_address "
                 "FROM default_notes "
                     "JOIN company ON company.rowid = 1 "
                 "WHERE tflag = "%QString::number(PO)%";");
         } else {
-            qry.exec("SELECT date(po.date,'localtime'), userdata.name, userdata.email, date(po.date_needed,'localtime'), po.notes "
+            qry.exec("SELECT DATE(po.date,'localtime'), userdata.name, userdata.email, DATE(po.date_expected,'localtime'), po.notes "
                 ",po.supplier_id, po.supplier_internal, po.supplier_address, po.shipping_address, po.billing_address "
                 "FROM po "
-                    "JOIN userdata ON userdata.id = po.requested_by "
+                    "JOIN userdata ON userdata.id = po.authorized_by "
                     "JOIN suppliers ON po.supplier_id = suppliers.id "
                 "WHERE po.num = "%docnum%";");
         }
+        qDebug() << qry.lastError();
         qry.next();
         ui->detailsNames->setText("Date:\nCreator:"%returnStringINN(qry.value(2).toString(),"\nEmail:"));
         ui->detailsValues->setText(qry.value(0).toString()%"\n"%qry.value(1).toString()%returnStringINN(qry.value(2).toString(),"\n"%qry.value(2).toString()));
         ui->internalWidget->findChild<QDateTimeEdit*>("date")->setDate(qry.value(3).toDate());
         ui->notes->setPlainText(qry.value(4).toString());
 
-        if (!qry.value(5).isNull()) {
-            QComboBox *combo = ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo");
+        QComboBox *combo = ui->info->findChild<QWidget*>(QString::number(Supplier))->findChild<QComboBox*>("combo");
+        if (qry.value(5).isNull()) {
+            combo->setEditText(qry.value(5).toString());
+        } else {
             combo->setCurrentIndex(matchingRow(qry.value(5).toString(), combo->model()));
         }
 
@@ -1641,23 +1669,23 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
         //date, name, email, date_arrived, notes, po_num, invoice_num, delivered_by, supplier_id, supplier_internal, supplier_address
         if (modifier == PO) {
             if (validPO) {
-                qry.exec("SELECT date('now', 'localtime'), userdata.name, userdata.email, date(po.date_expected, 'localtime'), default_notes.notes "
+                qry.exec("SELECT DATE('now', 'localtime'), userdata.name, userdata.email, DATE(po.date_expected, 'localtime'), default_notes.notes "
                     ",po.num, po.invoice_num, po.supplier_id, po.supplier_internal, po.supplier_address, null "
                     "FROM po "
                         "LEFT JOIN default_notes ON default_notes.tflag = "%QString::number(RR)%" "
                         "LEFT JOIN userdata ON po.authorized_by = userdata.id"
                     "WHERE po.num = "%docnum%";");
             } else {
-                qry.exec("SELECT date('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", date('now', 'localtime'), notes "
+                qry.exec("SELECT DATE('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", DATE('now', 'localtime'), notes "
                     ","%escapeSql(docnum)%", null, null, null, null, null "
                     "FROM default_notes WHERE tflag = "%QString::number(RR)%";");
             }
         } else if (docnum.isEmpty()) {
-            qry.exec("SELECT date('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", date('now', 'localtime'), notes "
+            qry.exec("SELECT DATE('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", DATE('now', 'localtime'), notes "
                 ",null, null, null, null, null, null "
                 "FROM default_notes WHERE tflag = "%QString::number(RR)%";");
         } else {
-            qry.exec("SELECT date(rr.date,'localtime'), userdata.name, userdata.email, date(rr.date_arrived, 'localtime'), rr.notes "
+            qry.exec("SELECT DATE(rr.date,'localtime'), userdata.name, userdata.email, DATE(rr.date_arrived, 'localtime'), rr.notes "
                 ",rr.po_num, rr.invoice_num, rr.supplier_id, rr.supplier_internal, rr.supplier_address, rr.delivered_by "
                 "FROM rr "
                     "JOIN userdata ON userdata.id = rr.inspected_by "
@@ -1690,21 +1718,20 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
     }
     case MR: {
         if (docnum.isEmpty() && authorized) {
-            qry.exec("SELECT date('now', 'localtime'), null, null, null "
+            qry.exec("SELECT DATE('now', 'localtime'), null, null, null "
                 ",null, null, null, null, notes "
                     "FROM default_notes "
                     " WHERE tflag = "%QString::number(MR)%";");
         } else {
             //An issuer cannot create MRs, they can only issue them.
-            qry.exec("SELECT date(mr.date_requested,'localtime'), mr.requested_by, date(mr.date_authorized, 'localtime'), authorizer.name "
-                ",date(mr.date_issued, 'localtime'), issuer.name, mr.collected_by, mr.project, mr.notes "
+            qry.exec("SELECT DATE(mr.date_requested,'localtime'), mr.requested_by, DATE(mr.date_authorized, 'localtime'), authorizer.name "
+                ",DATE(mr.date_issued, 'localtime'), issuer.name, mr.collected_by, mr.project, mr.notes "
                     "FROM mr "
                     "LEFT JOIN userdata AS 'authorizer' ON userdata.id = mr.authorized_by"
                     "LEFT JOIN userdata AS 'issuer' ON userdata.id = mr.issued_by "
                     "WHERE mr.num = "%docnum%";");
         }
         qry.next();
-        //REMOVE EMAILS
         ui->detailsNames->setText("Date Requested:\nDate Authorized:\nAuthorized by:\nDate Issued:\nIssued by:");
         ui->detailsValues->setText(qry.value(0).toString()
                                    %"\n"%qry.value(2).toString()
@@ -1886,6 +1913,11 @@ void CreateDocument::DeleteDocument(QSqlQuery qry, QString docnum)
     qry.exec("DELETE FROM "%docname%" WHERE num = "%docnum%";");
     qry.exec("DELETE FROM custom_details WHERE tnum = "%docnum%" AND tflag = "%tflag%";");
     qry.exec("DELETE FROM custom_expenses WHERE tnum = "%docnum%" AND tflag = "%tflag%";");
+    if (tFlag == QR) {
+        qry.exec("DELETE FROM prd_qrd_linker WHERE qrd_id = "%docnum%";");
+    } else if (tFlag == PO) {
+        qry.exec("DELETE FROM prd_pod_linker WHERE pod_id = "%docnum%";");
+    }
 }
 
 void CreateDocument::on_cancel_clicked()
@@ -1998,7 +2030,7 @@ void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDoc
         QString project = validateProject(qry, findChild<QComboBox*>("project")->currentText());
         qry.exec("INSERT INTO pr (num, date, date_needed, requested_by, notes, status, project, "%totalsColumns%") VALUES ("
                  %newDocNum
-                 %",datetime('now')"
+                 %",DATETIME('now')"
                   ",'"%ui->internalWidget->findChild<QDateTimeEdit*>("date")->date().toString("yyyy-MM-dd")%"'"
                   ","%user->id
                  %","%escapeSql(ui->notes->toPlainText())
@@ -2016,17 +2048,17 @@ void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDoc
         QString supplierAddress = supplierWidget->findChild<QPlainTextEdit*>("address")->toPlainText();
         QString supplierInternal = supplierWidget->findChild<QPlainTextEdit*>("internal")->toPlainText();
         QString supplierId;
-        if (supplierWidget->findChild<QStandardItemModel*>("supplierModel")->item(supplierCombo->currentIndex(), 3) != nullptr) {
-            supplierId = validateSupplierId(qry, supplierWidget->findChild<QStandardItemModel*>("supplierModel")->item(supplierCombo->currentIndex(), 3)->text(), supplierName, supplierAddress, supplierInternal);
+        if (supplierCombo->model()->index(supplierCombo->currentIndex(), 1).data().toString() == nullptr) {
+            supplierId = insertNewSupplier(qry, supplierName, supplierAddress, supplierInternal);
         } else {
-            supplierId = validateSupplierId(qry, QString(), supplierName, supplierAddress, supplierInternal);
+            supplierId = validateSupplierId(qry, supplierCombo->model()->index(supplierCombo->currentIndex(), 1).data().toString(), supplierName, supplierAddress, supplierInternal);
         }
         QString shippingAddress = ui->info->findChild<QWidget*>(QString::number(ShippingAddress))->findChild<QPlainTextEdit*>("address")->toPlainText();
         QString billingAddress = ui->info->findChild<QWidget*>(QString::number(BillingAddress))->findChild<QPlainTextEdit*>("address")->toPlainText();
         qry.exec("INSERT INTO qr (num, date, date_needed, requested_by, supplier_id, supplier_address, shipping_address, billing_address, notes, status) "
             "VALUES ("
                 %newDocNum
-                %",datetime('now')"
+                %",DATETIME('now')"
                  ",'"%ui->internalWidget->findChild<QDateTimeEdit*>("date")->date().toString("yyyy-MM-dd")%"'"
                  ","%user->id
                 %","%supplierId
@@ -2039,6 +2071,36 @@ void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDoc
         break;
     }
     case PO: {
+        QWidget *supplierWidget = ui->info->findChild<QWidget*>(QString::number(Supplier));
+        QComboBox *supplierCombo = supplierWidget->findChild<QComboBox*>("combo");
+        QString supplierId;
+        QString supplierName = supplierCombo->currentText();
+        QString supplierAddress = supplierWidget->findChild<QPlainTextEdit*>("address")->toPlainText();
+        QString supplierInternal = supplierWidget->findChild<QPlainTextEdit*>("internal")->toPlainText();
+        if (supplierCombo->model()->index(supplierCombo->currentIndex(), 1).data().toString() == nullptr) {
+            supplierId = insertNewSupplier(qry, supplierName, supplierAddress, supplierInternal);
+        } else {
+            supplierId = validateSupplierId(qry, supplierCombo->model()->index(supplierCombo->currentIndex(), 1).data().toString(), supplierName, supplierAddress, supplierInternal);
+        }
+
+        qry.exec("INSERT INTO po (num, date, date_expected, invoice_num, authorized_by, supplier_id, supplier_address, supplier_internal "
+            ",shipping_address, billing_address, notes, status, "%totalsColumns%") "
+            "VALUES ("
+                %newDocNum
+                %",DATETIME('now')"
+                 ",'"%ui->internalWidget->findChild<QDateTimeEdit*>("date")->date().toString("yyyy-MM-dd")%"'"
+                %","%escapeSql(ui->internalWidget->findChild<QLineEdit*>("invoice")->text())
+                %","%user->id
+                %","%supplierId
+                %","%escapeSql(supplierAddress)
+                %","%escapeSql(supplierInternal)
+                %","%escapeSql(ui->info->findChild<QWidget*>(QString::number(ShippingAddress))->findChild<QPlainTextEdit*>("address")->toPlainText())
+                %","%escapeSql(ui->info->findChild<QWidget*>(QString::number(BillingAddress))->findChild<QPlainTextEdit*>("address")->toPlainText())
+                %","%escapeSql(ui->notes->toPlainText())
+                %","%QString::number(status)
+                %","%fetchTotalsValuesForSql()
+            %");");
+        storeCustomExpenses(qry, newDocNum);
         break;
     }
     default:
@@ -2046,44 +2108,117 @@ void CreateDocument::storeTable(QSqlQuery qry, QString oldDocNum, QString newDoc
     }
 
     storeCustomDetails(qry, newDocNum);
-    table->storeRows(qry, newDocNum, QString::number(status));
+    table->storeRows(qry, newDocNum, status);
 }
 
-void ResizableTable::storeRows(QSqlQuery qry, QString docnum, QString status)
+void ResizableTable::storeRows(QSqlQuery qry, QString docnum, int status)
 {
     switch (tflag) {
     case PR: {
-        for (int row = 0; row < finalRow; row++)
-        {
+        for (int row = 0; row < finalRow; row++) {
             QString itemId = validateItemId(qry, row);
             QString supplierId = qobject_cast<QLineEdit*>(cellWidget(row, cid.supplier))->text().isEmpty() ? "null" : validateSupplierId(qry, row);
-            qry.exec(QString("INSERT INTO prd (pr_num, supplier_id, item_id, qty, taxable, expected_unit_price, total, status) "
-                "VALUES (%1, %2, %3, %4, %5, %6, %7, %8);")
+            qry.exec(QString("INSERT INTO prd (pr_num, supplier_id, item_id, qty, qty_not_ordered, taxable, expected_unit_price, total, status) "
+                "VALUES (%1, %2, %3, %4, %5, %6, %7, %8, %9);")
                      .arg(docnum
                           ,supplierId
                           ,itemId
-                          ,escapeSql(item(row,cid.qty)->text())
+                          ,escapeSql(item(row, cid.qty)->text())
+                          ,escapeSql(item(row, cid.qty)->text())
                           ,QString::number(cellWidget(row,cid.taxable)->findChild<QCheckBox*>("box")->isChecked())
                           ,escapeSql(item(row,cid.unitPrice)->text())
-                          ,escapeSql(item(row,cid.total)->text())
-                          ,status));
+                          ,escapeSql(qobject_cast<QLineEdit*>(cellWidget(row,cid.total))->text())
+                          ,QString::number(status)));
         }
         break;
     }
     case QR: {
-        for (int row = 0; row < finalRow; row++)
-        {
+        for (int row = 0; row < finalRow; row++) {
             QString itemId = validateItemId(qry, row);
-            qry.exec(QString("INSERT INTO qrd (qr_num, item_id, prd_id, qty, notes) "
-                "VALUES (%1, %2, %3, %4, %5);")
-                     .arg(docnum
+
+            QSqlDatabase atomicDB = QSqlDatabase::database("sim");
+            atomicDB.transaction();
+            QSqlQuery atomic(atomicDB);
+
+            QString qrd;
+            atomic.exec("SELECT id FROM qrd ORDER BY id DESC LIMIT 1");
+            if (atomic.next())
+                qrd = QString::number(atomic.value(0).toInt() + 1);
+            else
+                qrd = "1";
+
+            atomic.exec(QString("INSERT INTO qrd (id, qr_num, item_id, qty, notes, status) "
+                "VALUES (%1, %2, %3, %4, %5, %6)")
+                     .arg(qrd
+                          ,docnum
                           ,itemId
-                          ,item(row, cid.prdId)->text()
                           ,escapeSql(item(row, cid.qty)->text())
-                          ,escapeSql(item(row, cid.notes)->text())));
-            qry.exec("UPDATE prd SET status = 2 WHERE id = "%item(row, cid.prdId)->text()%";");
+                          ,escapeSql(item(row, cid.notes)->text())
+                          ,QString::number(status)));
+
+            //This updates the PRD status to show that it has been quoted
+            QStringList prdList = item(row,cid.prdId)->text().split(",", Qt::SkipEmptyParts);
+            QString prd;
+            for (int i = 0; i < prdList.size(); i++) {
+                prd = prdList.at(i);
+                atomic.exec("INSERT INTO prd_qrd_linker (prd_id, qrd_id) VALUES ("%prd%","%qrd%")");
+                if (status != 0) {
+                    atomic.exec("UPDATE prd SET status = 2 WHERE id = "%prd);
+                }
+            }
+            atomicDB.commit();
         }
         break;
+    }
+    case PO: {
+        for (int row = 0; row < finalRow; row++) {
+            QString itemId = validateItemId(qry, row);
+
+            QSqlDatabase atomicDB = QSqlDatabase::database("sim");
+            atomicDB.transaction();
+            QSqlQuery atomic(atomicDB);
+
+            QString pod;
+            atomic.exec("SELECT id FROM pod ORDER BY id DESC LIMIT 1");
+            if (atomic.next())
+                pod = QString::number(atomic.value(0).toInt() + 1);
+            else
+                pod = "1";
+
+            atomic.exec(QString("INSERT INTO pod (id, po_num, item_id, qty, unit_price, taxable, total, status) "
+                "VALUES (%1, %2, %3, %4, %5, %6, %7, %8)")
+                     .arg(pod
+                          ,docnum
+                          ,itemId
+                          ,escapeSql(item(row, cid.qty)->text())
+                          ,escapeSql(item(row, cid.unitPrice)->text())
+                          ,QString::number(cellWidget(row,cid.taxable)->findChild<QCheckBox*>("box")->isChecked())
+                          ,escapeSql(qobject_cast<QLineEdit*>(cellWidget(row,cid.total))->text())
+                          ,QString::number(status)));
+
+            //This ensures that the amount of items in the POD is commensurate to the amount of items in the PRD
+
+            QStringList prdList = item(row, cid.prdId)->text().split(",", Qt::SkipEmptyParts);
+            QString prd;
+            int qty = item(row, cid.qty)->text().toInt();
+            for (int i = 0; i < prdList.size(); i++) {
+                if (qty <= 0)
+                    break;
+                prd = prdList.at(i);
+                atomic.exec("INSERT INTO prd_pod_linker (prd_id, pod_id) VALUES ("%prd%","%pod%")");
+
+                if (status != 0) {
+                    atomic.exec("SELECT qty_not_ordered FROM prd WHERE prd.id = "%prd);
+                    atomic.next();
+                    qty -= atomic.value(0).toInt();
+                    if (qty >= 0)
+                        atomic.exec("UPDATE prd SET status = 4, qty_not_ordered = 0 WHERE id = "%prd);
+                    else
+                        atomic.exec("UPDATE prd SET status = 3, qty_not_ordered = "%QString::number(0-qty)%" WHERE id = "%prd);
+                }
+            }
+            atomicDB.commit();
+        }
     }
     default:
         break;
@@ -2240,7 +2375,8 @@ QString insertNewSupplier(QSqlQuery qry, QString supplierName, QString address, 
     qry.exec("INSERT INTO suppliers (name"%returnStringINN(address, ",address")%returnStringINN(internal, ",internal")%")"
         "VALUES ("%escapeSql(supplierName)
              %returnStringINN(address, ","%escapeSql(address))
-             %returnStringINN(internal, ","%escapeSql(internal))%");");
+             %returnStringINN(internal, ","%escapeSql(internal))
+             %");");
     qry.exec("SELECT id FROM suppliers ORDER BY id DESC LIMIT 1;");
     qry.next();
     return qry.value(0).toString();

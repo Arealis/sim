@@ -21,7 +21,6 @@
 #include "mainwindow.h"
 
 #include <QApplication>
-#include <QSqlQueryModel>
 
 int main(int argc, char *argv[])
 {

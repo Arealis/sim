@@ -70,7 +70,7 @@ public:
 
     void calculateSubtotal(int row);
 
-    void storeRows(QSqlQuery qry, QString docnum, QString status);
+    void storeRows(QSqlQuery qry, QString docnum, int status);
 
     void fetchRows(QSqlQuery qry, QString docnum, TableFlag modifier = PR); //The modifier is set to PR by default because PR has no purpose as a modifier.
 
