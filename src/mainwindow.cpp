@@ -442,17 +442,18 @@ void MainWindow::createNewSIMDB()
              * 7 = Forced Closed........ The PO was closed without all items being received. This may be useful in cases where the company has to cut their losses with a vendor.
              */
     qry.exec("CREATE TABLE pod ("
-                "id             INTEGER PRIMARY KEY "
-                ",po_num        INTEGER REFERENCES po (num) ON UPDATE CASCADE "
-                ",item_id       INTEGER REFERENCES items (id) ON UPDATE CASCADE NOT NULL "
-                ",qty           REAL NOT NULL "
-                ",unit_price    REAL NOT NULL "
-                ",discount_rate REAL " // This may not be shown, but may be useful internally
-                ",discount      REAL " // Amount
-                ",taxable       BOOL NOT NULL DEFAULT 1 " //Can tax be applied to this item?
-                ",total         REAL NOT NULL " //qty * unit_price - discount
-                ",status        INTEGER NOT NULL DEFAULT 0 " // See below for status info
-                ",condition     TEXT " // This is a mirror of the condition in receiving report details
+                "id                 INTEGER PRIMARY KEY "
+                ",po_num            INTEGER REFERENCES po (num) ON UPDATE CASCADE "
+                ",item_id           INTEGER REFERENCES items (id) ON UPDATE CASCADE NOT NULL "
+                ",qty               REAL NOT NULL "
+                ",qty_not_delivered REAL NOT NULL"
+                ",unit_price        REAL NOT NULL "
+                ",discount_rate     REAL " // This may not be shown, but may be useful internally
+                ",discount          REAL " // Amount
+                ",taxable           BOOL NOT NULL DEFAULT 1 " //Can tax be applied to this item?
+                ",total             REAL NOT NULL " //qty * unit_price - discount
+                ",status            INTEGER NOT NULL DEFAULT 0 " // See below for status info
+                ",condition         TEXT " // This is a mirror of the condition in receiving report details
             ");");
             /*              POD status FLAGS
              *  0 = none received

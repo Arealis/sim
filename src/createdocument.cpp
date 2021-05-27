@@ -73,6 +73,7 @@ CreateDocument::CreateDocument(TableFlag tableFlag, QString docNum, User *userDa
     QSqlQuery qry(db);
 
     customDetailCount = 0;
+    customExpenseRowCount = 0;
     addDetailButtonRow = 1; // The row in the gridLayout where the addCustom button lives. This will always be the final populated row.
 
     //      SHARED DOCUMENT INFO
@@ -231,16 +232,18 @@ CreateDocument::CreateDocument(TableFlag tableFlag, QString docNum, User *userDa
 
         QStandardItemModel *poModel = new QStandardItemModel(ui->internalWidget);
         poModel->setObjectName("poModel");
+        poModel->setItem(0, 0, new QStandardItem("No PO#"));
         db.open();
         qry.exec("SELECT num FROM po WHERE status > 0 AND status < 5;");
-        for (int i = 0; qry.next(); i++) {
+        for (int i = 1; qry.next(); i++) {
             poModel->setItem(i, 0, new QStandardItem(qry.value(0).toString()));
         }
         db.close();
+
         QLabel *poComboBoxLabel = new QLabel("PO#", ui->internalWidget);
-        QComboBox *poComboBox = initComboBox(poModel, ui->info);
+        QComboBox *poComboBox = new QComboBox(ui->internalDetails);
+        poComboBox->setModel(poModel);
         poComboBox->setObjectName("po");
-        poComboBox->lineEdit()->setPlaceholderText("Select PO#");
         ui->internalDetailsGrid->addWidget(poComboBoxLabel, 2, 0);
         ui->internalDetailsGrid->addWidget(poComboBox, 2, 1);
 
@@ -257,9 +260,9 @@ CreateDocument::CreateDocument(TableFlag tableFlag, QString docNum, User *userDa
             clear();
             QString doc = poComboBox->currentText();
             db.open();
+            table->fetchRows(qry, doc, PO);
             fetchDetails(qry, doc, PO);
             insertRecurringCustomDetails(qry, &addDetailButtonRow);
-            table->fetchRows(qry, doc, PO);
             db.close();
         });
         //TODO: Add invoice number functionality (I have not yet thought about how to allow for the selection of invoices that can occasionally have duplicate values).
@@ -447,8 +450,9 @@ void ResizableTable::initializeColumns()
         break;
     }
     case RR: {
-        colNames = {"id", "Item ID", "Description", "Category", "Unit", "Qty", "Condition"};
+        colNames = {"id", "Item ID", "Description", "Category", "Unit", "Qty", "Condition", "pod.id"};
         cid.condition = 6;
+        cid.podId = 7;
         break;
     }
     case MR: {
@@ -515,6 +519,16 @@ void ResizableTable::resizeEvent(QResizeEvent *event) //This is called multiple 
         setColumnWidth(cid.total    ,w*2);
         break;
     }
+    case RR: {
+        w = w / 20;
+        setColumnWidth(cid.itemNum  ,w*3);
+        setColumnWidth(cid.itemDesc ,w*5);
+        setColumnWidth(cid.cat      ,w*2);
+        setColumnWidth(cid.unit     ,w*2);
+        setColumnWidth(cid.qty      ,w*1);
+        setColumnWidth(cid.condition,w*6);
+        break;
+    }
     }
     horizontalHeader()->setStretchLastSection(true);
 }
@@ -523,9 +537,9 @@ void ResizableTable::appendRow()
 {
     finalRow = rowCount();
     setRowCount(rowCount()+1);
-    for (int i = 0; i < columnCount(); i++)
+    for (int column = 0; column < columnCount(); column++)
     {
-        setItem(finalRow,i, new QTableWidgetItem());
+        setItem(finalRow, column, new QTableWidgetItem());
     }
 
     initLineEdit(finalRow, Item);
@@ -551,6 +565,10 @@ void ResizableTable::appendRow()
         setColumnHidden(cid.status, true);
         setColumnHidden(cid.prdId, true);
         break;
+    }
+    case RR: {
+        setColumnHidden(cid.podId, true);
+        break;;
     }
     default:
         break;
@@ -586,13 +604,13 @@ void ResizableTable::fetchRows(QSqlQuery qry, QString docnum, TableFlag modifier
     }
     case RR: {
         if (modifier == PO) {
-            qry.exec("SELECT pod.id, pod.item_id, items.num, items.desc, items.cat, items.unit, rrd.qty, null "
+            qry.exec("SELECT pod.item_id, items.num, items.desc, items.cat, items.unit, rrd.qty, null, pod.id "
                 "FROM pod "
                 "JOIN items ON items.id = pod.item_id "
                 "LEFT JOIN rrd ON rrd.pod_id = pod.id "
                 "WHERE pod.po_num = "%docnum%";");
         } else {
-            qry.exec("SELECT rrd.pod_id, rrd.item_id, items.num, items.desc, items.cat, items.unit, rrd.qty, rrd.condition "
+            qry.exec("SELECT rrd.item_id, items.num, items.desc, items.cat, items.unit, rrd.qty, rrd.condition, rrd.pod_id "
                 "FROM rrd "
                 "LEFT JOIN items ON items.id = rrd.item_id "
                 "WHERE rrd.rr_num = "%docnum%";");
@@ -1673,7 +1691,7 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
                     ",po.num, po.invoice_num, po.supplier_id, po.supplier_internal, po.supplier_address, null "
                     "FROM po "
                         "LEFT JOIN default_notes ON default_notes.tflag = "%QString::number(RR)%" "
-                        "LEFT JOIN userdata ON po.authorized_by = userdata.id"
+                        "LEFT JOIN userdata ON po.authorized_by = userdata.id "
                     "WHERE po.num = "%docnum%";");
             } else {
                 qry.exec("SELECT DATE('now', 'localtime'), "%escapeSql(user->name)%","%escapeSql(user->email)%", DATE('now', 'localtime'), notes "
@@ -1703,7 +1721,7 @@ void CreateDocument::fetchDetails(QSqlQuery qry, QString docnum, TableFlag modif
             if (!validPO) {
                 poCombo->setEditText(docnum);
             } else {
-                poCombo->setCurrentIndex(matchingRow(qry.value(5).toString(), poCombo->model()));
+                poCombo->setCurrentIndex(matchingRow(qry.value(5).toString(), poCombo->model(), 0));
                 ui->internalDetails->findChild<QLineEdit*>("invoice")->setText(qry.value(6).toString());
             }
         }

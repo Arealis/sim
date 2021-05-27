@@ -51,6 +51,7 @@ public:
         char notes;
         char prdId;
         char condition;
+        char podId;
     };
 
     QSqlDatabase db;
