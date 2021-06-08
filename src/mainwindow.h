@@ -34,6 +34,8 @@ public:
 
     void displayTable(QString title, QSqlDatabase database, QString query);
 
+    QString openClosedDraftCases(QString column);
+
     inline QString siblingAtHeader(const QModelIndex &index, QString headerName);
 
     inline void hideColumnsVariadic();

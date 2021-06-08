@@ -28,6 +28,7 @@ SOURCES += \
     userlogin.cpp
 
 HEADERS += \
+    advancedmacros.h \
     createdocument.h \
     editcompanyinfo.h \
     global.h \

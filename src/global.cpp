@@ -18,9 +18,9 @@
     along with Simple Inventory Manager.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "global.h"
 #include <QStringBuilder>
 #include <QRegularExpression>
+#include "global.h"
 
 QString escapeSql(QString string) //This will escape the (') string delimiter in SQLite to protect from SQL Injections.
 {
@@ -52,6 +52,110 @@ void User::clear()
     name.clear();
     email.clear();
     privelage = Viewer;
+}
+
+//Templates for flags
+
+Status::Status(int status, TableFlag tflag)
+{
+    m_status = status;
+    m_tflag = tflag;
+}
+
+template <typename T>
+QStringList Status::flags() //This function is functional but terrible, and signifies a massive problem with how enums are handled right now.
+{
+    T it, end;
+    switch (m_tflag) {
+    case PR: {
+        it = pr.map.begin();
+        end = pr.map.end();
+        break;
+    }
+    case QR: {
+        it = qr.map.begin();
+        end = qr.map.end();
+        break;
+    }
+    case PO: {
+        it = po.map.begin();
+        end = po.map.end();
+        break;
+    }
+    case RR: {
+        it = rr.map.begin();
+        end = rr.map.end();
+        break;
+    }
+    case MR: {
+        it = mr.map.begin();
+        end = mr.map.end();
+        break;
+    }
+    }
+
+    QStringList flags;
+    while (it != end) {
+        if (hasFlag(it->first)) {
+            flags.append(it->second);
+        }
+    }
+    return flags;
+}
+
+template <typename T>
+T Status::current()
+{
+    return m_status;
+}
+
+template <typename T, typename ... Args>
+T Status::setFlags(Args ... flags)
+{
+    return m_status = combineFlags(flags...);
+}
+
+template <typename T, typename ... Args>
+T Status::addFlags(Args ... flags)
+{
+    return m_status = m_status | combineFlags(flags...);
+}
+
+template <typename T, typename ... Args>
+T Status::removeFlags(Args ... flags)
+{
+    return m_status = m_status & (~combineFlags(flags...));
+}
+
+template <typename T>
+bool Status::hasFlag(T flag)
+{
+    if ((flag & m_status) != 0)
+        return true;
+    else
+        return false;
+}
+
+template <typename T, typename ... Args>
+bool Status::hasFlags(Args ... flags)
+{
+    T flag = combineFlags(flags...);
+    if ((flag & ~(m_status & flag)) == 0)
+        return true;
+    else
+        return false;
+}
+
+template <typename T, typename ... Args>
+T Status::combineFlags(T flag1, Args ... moreFlags)
+{
+    return flag1 | combineFlags(moreFlags...);
+}
+
+template <typename T>
+T Status::combineFlags(T flag1)
+{
+    return flag1;
 }
 
 

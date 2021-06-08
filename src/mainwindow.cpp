@@ -359,7 +359,7 @@ void MainWindow::createNewSIMDB()
                 ",tax                           REAL "
                 ",total                         REAL "
                 ",notes                         TEXT "
-                ",status                        INTEGER NOT NULL DEFAULT 0 "
+                ",status                        INTEGER NOT NULL "
             ");");
     /* STATUS FLAGS
      *      0 = DRAFT
@@ -378,7 +378,7 @@ void MainWindow::createNewSIMDB()
                 ",expected_unit_price   REAL "
                 ",taxable               BOOLEAN "
                 ",total                 REAL "
-                ",status                INTEGER NOT NULL DEFAULT 0 /*0=draft,1=open,2=QRSent,3=Ordered,4=Rejected,5=NotAvailable*/ "
+                ",status                INTEGER NOT NULL "
             ");");
     qry.exec("CREATE TABLE qr ( "
                 "num                INTEGER PRIMARY KEY "
@@ -391,7 +391,7 @@ void MainWindow::createNewSIMDB()
                 ",shipping_address  TEXT "
                 ",billing_address   TEXT "
                 ",notes             TEXT "
-                ",status            INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=open, 2=Closed (Quote Received), 3=Discarded*/ "
+                ",status            INTEGER NOT NULL "
             ");");
     qry.exec("CREATE TABLE qrd ( "
                 "id         INTEGER PRIMARY KEY "
@@ -399,7 +399,7 @@ void MainWindow::createNewSIMDB()
                 ",item_id   INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty       REAL NOT NULL "
                 ",notes     TEXT "
-                ",status    INTEGER NOT NULL DEFAULT 0 /*0=draft, 1=Open, 2=Quoted, 3=PriceNotAvailable, 4=Discarded*/"
+                ",status    INTEGER NOT NULL "
             ");");
     qry.exec("CREATE TABLE prd_qrd_linker ("
                 "prd_id INTEGER NOT NULL REFERENCES prd (id) "
@@ -429,18 +429,8 @@ void MainWindow::createNewSIMDB()
                 ",tax                           REAL "
                 ",total                         REAL "
                 ",notes                         TEXT " //Any additional information or instructions
-                ",status                        INTEGER NOT NULL DEFAULT 0 " // See below for status info
+                ",status                        INTEGER NOT NULL "
            ");");
-            /*              status FLAGS ARE AS FOLLOWS
-             * 0 = Draft................ The PO is still a draft.
-             * 1 = Sent................. The PO has been sent out but the vendor has not accepted it yet.
-             * 2 = Open................. The vendor has accepted the PO but it is not known whether the items have shipped yet.
-             * 3 = Shipped.............. Items have been shipped, but none have been received. This is useful to note because of some vendor's FOB shipping policy.
-             * 4 = Partially Received... Only some of the items from the PO have been been received.
-             * 5 = Closed............... All items from the PO have been received.
-             * 6 = Rejected............. The PO was not accepted by the vendor for some reason.
-             * 7 = Forced Closed........ The PO was closed without all items being received. This may be useful in cases where the company has to cut their losses with a vendor.
-             */
     qry.exec("CREATE TABLE pod ("
                 "id                 INTEGER PRIMARY KEY "
                 ",po_num            INTEGER REFERENCES po (num) ON UPDATE CASCADE "
@@ -452,8 +442,8 @@ void MainWindow::createNewSIMDB()
                 ",discount          REAL " // Amount
                 ",taxable           BOOL NOT NULL DEFAULT 1 " //Can tax be applied to this item?
                 ",total             REAL NOT NULL " //qty * unit_price - discount
-                ",status            INTEGER NOT NULL DEFAULT 0 " // See below for status info
-                ",condition         TEXT " // This is a mirror of the condition in receiving report details
+                ",condition         INTEGER " // This is a mirror of the condition in receiving report details
+                ",status            INTEGER NOT NULL "
             ");");
             /*              POD status FLAGS
              *  0 = none received
@@ -476,7 +466,7 @@ void MainWindow::createNewSIMDB()
                 ",supplier_address      TEXT "
                 ",supplier_internal     TEXT "
                 ",notes                 TEXT "
-                ",status                INTEGER NOT NULL DEFAULT 0 "
+                ",status                INTEGER NOT NULL "
             ");");
     qry.exec("CREATE TABLE rrd ("
                 "id             INTEGER PRIMARY KEY "
@@ -485,8 +475,8 @@ void MainWindow::createNewSIMDB()
                 ",item_id       INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty           REAL NOT NULL " //This has to be checked against the PO
                 ",unit          TEXT "
-                ",condition     TEXT NOT NULL REFERENCES conditions (name) "
                 ",notes         TEXT "
+                ",status        TEXT NOT NULL " //In this case, the status represents the condition of the item
             ");");
     qry.exec("CREATE TABLE mr ("
                 "num                INTEGER PRIMARY KEY "
@@ -499,14 +489,18 @@ void MainWindow::createNewSIMDB()
                 ",issued_by         INTEGER REFERENCES userdata (id) "
                 ",collected_by      TEXT "
                 ",notes             TEXT "
+                ",status            INTEGER NOT NULL "
             ");");
     qry.exec("CREATE TABLE mrd ( "
                 "id         INTEGER PRIMARY KEY "
                 ",mr_num    INTEGER NOT NULL REFERENCES mr (num) ON UPDATE CASCADE "
                 ",item_id   INTEGER NOT NULL REFERENCES items (id) ON UPDATE CASCADE "
                 ",qty       REAL NOT NULL "
+                ",status    INTEGER NOT NULL "
             ");");
     /*                                  A WORD ABOUT DRAFTS
+     *  Before, drafts used to inhabit the bottom few numbers of documents. Now, drafts are labeled as such by their
+     *  status flags.
      *  Drafts will inhabit the bottom few numbers of POs, so if POs begin from 1001, drafts span the numbers
      *  1 - 999. This means that it is possible to run out of drafts if the users managing the database do not
      *  clear out drafts. This is intentional (a.) because it significantly less complex that including a separate
@@ -531,6 +525,7 @@ void MainWindow::getHeaders() { //This function pulls the column (header) names 
 //Hide Columns variadic fuctions
 //These function will also remove these headers from the search for combo box
 inline void MainWindow::hideColumnsVariadic() {}
+
 
 template <typename Current, typename ... Extras>
 inline void MainWindow::hideColumnsVariadic(Current header, Extras ... moreHeaders)
@@ -578,6 +573,12 @@ void MainWindow::displayTable(QString title, QSqlDatabase database, QString quer
     ui->table->update();
 
     qDebug() << title << qry.lastError();
+}
+
+
+QString MainWindow::openClosedDraftCases(QString column)
+{
+    return " CASE ("%column%">>0) & 1 WHEN 1 THEN 'Draft, ' ELSE '' END || CASE ("%column%">>1) & 1 WHEN 1 THEN 'Open' ELSE 'Closed' END ";
 }
 
 /*  TODO: Additional functions needed:
@@ -822,14 +823,7 @@ void MainWindow::on_actionPurchase_Requisitions_triggered()
 {
     query = "SELECT pr.requested_by, userdata.name AS 'Requested By', pr.date AS 'Date Created', pr.date_needed AS 'Date Needed', pr.num AS 'PR#' "
         ",pr.project AS 'Project', group_concat(DISTINCT suppliers.id) AS 'supplier_id', group_concat(DISTINCT suppliers.name) AS 'Recommended Supplier(s)' "
-        ",CASE pr.status "
-            "WHEN 0 THEN 'Draft' "
-            "WHEN 1 THEN 'Closed '"
-            "WHEN 2 THEN 'Partial' "
-            "WHEN 3 THEN 'Open' "
-            "WHEN 4 THEN 'Partial (Item(s) Rejected)' "
-            "WHEN 5 THEN 'Closed (Item(s) Rejected)' "
-        "END AS 'Status' "
+        ","%openClosedDraftCases("pr.status")% " AS 'Status', pr.status "
         "FROM pr "
         "LEFT JOIN prd ON prd.pr_num = pr.num "
         "LEFT JOIN userdata ON pr.requested_by = userdata.id "
